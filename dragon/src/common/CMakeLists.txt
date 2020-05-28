@@ -1,0 +1,13 @@
+Ubpa_AddTarget(
+  TEST
+  MODE STATIC
+  LIB_INTERFACE
+    d3dcompiler.lib
+	D3D12.lib
+	dxgi.lib
+  DEFINE
+    UNICODE
+	_UNICODE
+  L_OPTION_INTERFACE
+    /SUBSYSTEM:WINDOWS
+)

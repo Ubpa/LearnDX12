@@ -4,7 +4,7 @@ project(Dragon VERSION 0.0.1)
 message(STATUS "[Project] ${PROJECT_NAME}")
 
 include(FetchContent)
-set(UCMake_VERSION 0.5.4)
+set(UCMake_VERSION 0.5.5)
 message(STATUS "find package: UCMake ${UCMake_VERSION}")
 find_package(UCMake ${UCMake_VERSION} QUIET)
 if(NOT UCMake_FOUND)
