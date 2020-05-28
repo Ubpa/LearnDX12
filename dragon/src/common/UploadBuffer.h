@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "d3dUtil.h"
 
@@ -6,6 +6,7 @@ template<typename T>
 class UploadBuffer
 {
 public:
+    // 创建一个上传缓冲区，并把该缓冲区与内存映射，后续可用 CopyData 进行数据更新
     UploadBuffer(ID3D12Device* device, UINT elementCount, bool isConstantBuffer) : 
         mIsConstantBuffer(isConstantBuffer)
     {
