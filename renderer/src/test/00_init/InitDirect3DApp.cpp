@@ -84,7 +84,8 @@ void InitDirect3DApp::Draw(const GameTimer& gt)
     // We can only reset when the associated command lists have finished execution on the GPU.
 	ThrowIfFailed(mDirectCmdListAlloc->Reset());
 
-	Ubpa::DX12::GraphicsCommandList commandlist{ mCommandList.Get() };
+	// Ubpa::DX12::GraphicsCommandList
+	Ubpa::DX12::GraphicsCommandList commandlist{ mCommandList };
 
 	// A command list can be reset after it has been added to the command queue via ExecuteCommandList.
     // Reusing the command list reuses memory.
