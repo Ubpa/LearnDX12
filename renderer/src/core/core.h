@@ -69,6 +69,51 @@ namespace Ubpa::DX12 {
         void Copy(const void* data, SIZE_T size);
         void Create(const void* data, SIZE_T size);
     };
+
+    // ref: https://docs.microsoft.com/en-us/windows/win32/direct3d12/creating-descriptor-heaps
+    class DescriptorHeap
+    {
+    public:
+        DescriptorHeap() { memset(this, 0, sizeof(*this)); }
+
+        HRESULT Create(
+            ID3D12Device* pDevice,
+            D3D12_DESCRIPTOR_HEAP_TYPE Type,
+            UINT NumDescriptors,
+            bool bShaderVisible = false)
+        {
+            D3D12_DESCRIPTOR_HEAP_DESC Desc;
+            Desc.Type = Type;
+            Desc.NumDescriptors = NumDescriptors;
+            Desc.Flags = (bShaderVisible ? D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE : D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
+            Desc.NodeMask = 0;
+
+            HRESULT hr = pDevice->CreateDescriptorHeap(&Desc,IID_PPV_ARGS(pDH.GetAddressOf()));
+            if (FAILED(hr)) return hr;
+
+            hCPUHeapStart = pDH->GetCPUDescriptorHandleForHeapStart();
+            hGPUHeapStart = pDH->GetGPUDescriptorHandleForHeapStart();
+
+            HandleIncrementSize = pDevice->GetDescriptorHandleIncrementSize(Desc.Type);
+            return hr;
+        }
+        operator ID3D12DescriptorHeap* () { return pDH.Get(); }
+
+        D3D12_CPU_DESCRIPTOR_HANDLE hCPU(UINT index)
+        {
+            return { hCPUHeapStart.ptr + index * HandleIncrementSize };
+        }
+        D3D12_GPU_DESCRIPTOR_HANDLE hGPU(UINT index)
+        {
+            assert(Desc.Flags & D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
+            return { hGPUHeapStart.ptr + index * HandleIncrementSize };
+        }
+        D3D12_DESCRIPTOR_HEAP_DESC Desc;
+        ComPtr<ID3D12DescriptorHeap> pDH;
+        D3D12_CPU_DESCRIPTOR_HANDLE hCPUHeapStart;
+        D3D12_GPU_DESCRIPTOR_HANDLE hGPUHeapStart;
+        UINT HandleIncrementSize;
+    };
 }
 
 #include "core.inl"

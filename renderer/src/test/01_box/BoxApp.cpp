@@ -13,6 +13,9 @@
 #include "../../Common/UploadBuffer.h"
 
 #include "../../core/core.h"
+#include "../../dx12fg/dx12fg.h"
+
+#include <UFG/FrameGraph.h>
 
 using Microsoft::WRL::ComPtr;
 using namespace DirectX;
@@ -84,6 +87,9 @@ private:
     // Ubpa::DX12
     Ubpa::DX12::GraphicsCommandList uCmdList;
     Ubpa::DX12::Device uDevice;
+    Ubpa::DX12::FG::ResourceMngr fgRsrcMngr;
+    Ubpa::DX12::FG::Executor fgExecutor;
+    Ubpa::FG::FrameGraph fg;
 };
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prevInstance,
@@ -126,6 +132,7 @@ bool BoxApp::Initialize()
     // Ubpa::DX12
     uCmdList = { mCommandList };
     uDevice = { md3dDevice };
+    fgRsrcMngr.Init(uCmdList, uDevice);
 
     // Reset the command list to prep for initialization commands.
     ThrowIfFailed(uCmdList->Reset(mDirectCmdListAlloc.Get(), nullptr));
@@ -186,9 +193,9 @@ void BoxApp::Draw(const GameTimer& gt)
 {
     // Reuse the memory associated with command recording.
     // We can only reset when the associated command lists have finished execution on the GPU.
-	ThrowIfFailed(mDirectCmdListAlloc->Reset());
+    ThrowIfFailed(mDirectCmdListAlloc->Reset());
 
-	// A command list can be reset after it has been added to the command queue via ExecuteCommandList.
+    // A command list can be reset after it has been added to the command queue via ExecuteCommandList.
     // Reusing the command list reuses memory.
     //ThrowIfFailed(uCmdList->Reset(mDirectCmdListAlloc.Get(), mPSO.Get()));
     uCmdList.Reset(mDirectCmdListAlloc.Get(), mPSO.Get());
@@ -199,58 +206,108 @@ void BoxApp::Draw(const GameTimer& gt)
     uCmdList.RSSetViewport(mScreenViewport);
     uCmdList.RSSetScissorRect(mScissorRect);
 
-    // Indicate a state transition on the resource usage.
-	//uCmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
-	//	D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET));
-    uCmdList.ResourceBarrier(CurrentBackBuffer(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
+    fg.Clear();
+    fgRsrcMngr.Clear();
+    fgExecutor.Clear();
 
-    // Clear the back buffer and depth buffer.
-    //uCmdList->ClearRenderTargetView(CurrentBackBufferView(), Colors::LightSteelBlue, 0, nullptr);
-    //uCmdList->ClearDepthStencilView(DepthStencilView(), D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
-    uCmdList.ClearRenderTargetView(CurrentBackBufferView(), Colors::LightSteelBlue);
-    uCmdList.ClearDepthStencilView(DepthStencilView());
-	
-    // Specify the buffers we are going to render to.
-	//uCmdList->OMSetRenderTargets(1, &CurrentBackBufferView(), true, &DepthStencilView());
-    uCmdList.OMSetRenderTarget(CurrentBackBufferView(), DepthStencilView());
+    auto backbuffer = fg.AddResourceNode("Back Buffer");
+    auto depthstencil = fg.AddResourceNode("Depth Stencil");
+    auto pass = fg.AddPassNode(
+        "Pass",
+        {},
+        { backbuffer,depthstencil }
+    );
+
+    D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc;
+    dsvDesc.Flags = D3D12_DSV_FLAG_NONE;
+    dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+    dsvDesc.Format = mDepthStencilFormat;
+    dsvDesc.Texture2D.MipSlice = 0;
+
+    fgRsrcMngr
+        .RegisterImportedRsrc(backbuffer, { CurrentBackBuffer(), D3D12_RESOURCE_STATE_PRESENT })
+        .RegisterImportedRsrc(depthstencil, { mDepthStencilBuffer.Get(), D3D12_RESOURCE_STATE_PRESENT })
+        .RegisterPassRsrcs(pass, backbuffer, D3D12_RESOURCE_STATE_RENDER_TARGET,
+            Ubpa::DX12::FG::ResourceMngr::RsrcImplDesc_RTV_Null{})
+        .RegisterPassRsrcs(pass, depthstencil, D3D12_RESOURCE_STATE_DEPTH_WRITE, dsvDesc);
+
+    fgExecutor.RegisterPassFunc(pass, [&](const Ubpa::DX12::FG::ResourceMngr::PassRsrcs& rsrcs) {
+        uCmdList.ClearRenderTargetView(rsrcs.find(backbuffer)->second.cpuHandle, Colors::LightSteelBlue);
+        uCmdList.ClearDepthStencilView(rsrcs.find(depthstencil)->second.cpuHandle);
+
+        uCmdList.OMSetRenderTarget(rsrcs.find(backbuffer)->second.cpuHandle, rsrcs.find(depthstencil)->second.cpuHandle);
 
 #pragma region core
-    //ID3D12DescriptorHeap* descriptorHeaps[] = { mCbvHeap.Get() };
-    //uCmdList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
-    uCmdList.SetDescriptorHeaps(mCbvHeap.Get());
+        uCmdList.SetDescriptorHeaps(mCbvHeap.Get());
 
-    uCmdList->SetGraphicsRootSignature(mRootSignature.Get());
+        uCmdList->SetGraphicsRootSignature(mRootSignature.Get());
 
-    // 'IA' : input assembler
-    uCmdList->IASetVertexBuffers(0, 1, &mBoxGeo->VertexBufferView());
-    uCmdList->IASetIndexBuffer(&mBoxGeo->IndexBufferView());
-    // PSO 设置了图元拓扑**类型**（点，线，三角形，四边形）
-    // 而这里是具体的图元拓扑
-    // 一般可为
-    /*
-        D3D_PRIMITIVE_TOPOLOGY_POINTLIST	= 1,
-        D3D_PRIMITIVE_TOPOLOGY_LINELIST	= 2,
-        D3D_PRIMITIVE_TOPOLOGY_LINESTRIP	= 3,
-        D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST	= 4,
-        D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP	= 5,
-        D3D_PRIMITIVE_TOPOLOGY_LINELIST_ADJ	= 10,
-        D3D_PRIMITIVE_TOPOLOGY_LINESTRIP_ADJ	= 11,
-        D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST_ADJ	= 12,
-        D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP_ADJ	= 13,
-    */
-    //uCmdList->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    uCmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        uCmdList->IASetVertexBuffers(0, 1, &mBoxGeo->VertexBufferView());
+        uCmdList->IASetIndexBuffer(&mBoxGeo->IndexBufferView());
+        uCmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-    // 绑定 CBV
-    uCmdList->SetGraphicsRootDescriptorTable(0, mCbvHeap->GetGPUDescriptorHandleForHeapStart());
+        uCmdList->SetGraphicsRootDescriptorTable(0, mCbvHeap->GetGPUDescriptorHandleForHeapStart());
 
-    uCmdList.DrawIndexed(mBoxGeo->DrawArgs["box"].IndexCount, 0, 0);
+        uCmdList.DrawIndexed(mBoxGeo->DrawArgs["box"].IndexCount, 0, 0);
 #pragma endregion
-	
-    // Indicate a state transition on the resource usage.
-	//uCmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
-	//	D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
-    uCmdList.ResourceBarrier(CurrentBackBuffer(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
+        });
+
+//    // Indicate a state transition on the resource usage.
+//	//uCmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
+//	//	D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET));
+//    //uCmdList.ResourceBarrier(CurrentBackBuffer(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
+//
+//    // Clear the back buffer and depth buffer.
+//    //uCmdList->ClearRenderTargetView(CurrentBackBufferView(), Colors::LightSteelBlue, 0, nullptr);
+//    //uCmdList->ClearDepthStencilView(DepthStencilView(), D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
+//    uCmdList.ClearRenderTargetView(CurrentBackBufferView(), Colors::LightSteelBlue);
+//    uCmdList.ClearDepthStencilView(DepthStencilView());
+//	
+//    // Specify the buffers we are going to render to.
+//	//uCmdList->OMSetRenderTargets(1, &CurrentBackBufferView(), true, &DepthStencilView());
+//    uCmdList.OMSetRenderTarget(CurrentBackBufferView(), DepthStencilView());
+//
+//#pragma region core
+//    //ID3D12DescriptorHeap* descriptorHeaps[] = { mCbvHeap.Get() };
+//    //uCmdList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+//    uCmdList.SetDescriptorHeaps(mCbvHeap.Get());
+//
+//    uCmdList->SetGraphicsRootSignature(mRootSignature.Get());
+//
+//    // 'IA' : input assembler
+//    uCmdList->IASetVertexBuffers(0, 1, &mBoxGeo->VertexBufferView());
+//    uCmdList->IASetIndexBuffer(&mBoxGeo->IndexBufferView());
+//    // PSO 设置了图元拓扑**类型**（点，线，三角形，四边形）
+//    // 而这里是具体的图元拓扑
+//    // 一般可为
+//    /*
+//        D3D_PRIMITIVE_TOPOLOGY_POINTLIST	= 1,
+//        D3D_PRIMITIVE_TOPOLOGY_LINELIST	= 2,
+//        D3D_PRIMITIVE_TOPOLOGY_LINESTRIP	= 3,
+//        D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST	= 4,
+//        D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP	= 5,
+//        D3D_PRIMITIVE_TOPOLOGY_LINELIST_ADJ	= 10,
+//        D3D_PRIMITIVE_TOPOLOGY_LINESTRIP_ADJ	= 11,
+//        D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST_ADJ	= 12,
+//        D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP_ADJ	= 13,
+//    */
+//    //uCmdList->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+//    uCmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+//
+//    // 绑定 CBV
+//    uCmdList->SetGraphicsRootDescriptorTable(0, mCbvHeap->GetGPUDescriptorHandleForHeapStart());
+//
+//    uCmdList.DrawIndexed(mBoxGeo->DrawArgs["box"].IndexCount, 0, 0);
+//#pragma endregion
+//	
+//    // Indicate a state transition on the resource usage.
+//	//uCmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
+//	//	D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
+//    uCmdList.ResourceBarrier(CurrentBackBuffer(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
+
+    Ubpa::FG::Compiler compiler;
+    auto [success, crst] = compiler.Compile(fg);
+    fgExecutor.Execute(fg, crst, fgRsrcMngr);
 
     // Done recording commands.
 	//ThrowIfFailed(uCmdList->Close());

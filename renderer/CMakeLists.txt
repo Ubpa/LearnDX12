@@ -23,6 +23,6 @@ endif()
 Ubpa_InitProject()
 
 Ubpa_AddDep(UGM 0.6.0)
-Ubpa_AddDep(UFG 0.0.1)
+Ubpa_AddDep(UFG 0.0.3)
 
 Ubpa_AddSubDirsRec(src)
