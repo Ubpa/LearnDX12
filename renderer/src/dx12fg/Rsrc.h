@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../core/core.h"
+#include <UDX12/UDX12.h>
 
 #include <variant>
 #include <unordered_map>

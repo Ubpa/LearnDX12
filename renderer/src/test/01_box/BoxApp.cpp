@@ -12,7 +12,7 @@
 #include "../../common/MathHelper.h"
 #include "../../common/UploadBuffer.h"
 
-#include "../../core/core.h"
+#include <UDX12/UDX12.h>
 
 #include "../../dx12fg/dx12fg.h"
 
@@ -86,7 +86,7 @@ private:
     POINT mLastMousePos;
 
     // Ubpa::DX12
-    Ubpa::DX12::GraphicsCommandList uCmdList;
+    Ubpa::DX12::GCmdList uGCmdList;
     Ubpa::DX12::Device uDevice;
     Ubpa::DX12::FG::RsrcMngr fgRsrcMngr;
     Ubpa::DX12::FG::Executor fgExecutor;
@@ -110,7 +110,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prevInstance,
 
         return theApp.Run();
     }
-    catch(DxException& e)
+    catch(Ubpa::DX12::Exception& e)
     {
         MessageBox(nullptr, e.ToString().c_str(), L"HR Failed", MB_OK);
         return 0;
@@ -132,12 +132,12 @@ bool BoxApp::Initialize()
 		return false;
 
     // Ubpa::DX12
-    uCmdList = { mCommandList };
+    uGCmdList = { mCommandList };
     uDevice = { md3dDevice };
-    fgRsrcMngr.Init(uCmdList, uDevice);
+    fgRsrcMngr.Init(uGCmdList, uDevice);
 
     // Reset the command list to prep for initialization commands.
-    ThrowIfFailed(uCmdList->Reset(mDirectCmdListAlloc.Get(), nullptr));
+    ThrowIfFailed(uGCmdList->Reset(mDirectCmdListAlloc.Get(), nullptr));
  
     BuildDescriptorHeaps();
 	BuildConstantBuffers();
@@ -147,8 +147,8 @@ bool BoxApp::Initialize()
     BuildPSO();
 
     // Execute the initialization commands.
-    ThrowIfFailed(uCmdList->Close());
-	ID3D12CommandList* cmdsLists[] = { uCmdList.raw.Get() };
+    ThrowIfFailed(uGCmdList->Close());
+	ID3D12CommandList* cmdsLists[] = { uGCmdList.raw.Get() };
 	mCommandQueue->ExecuteCommandLists(_countof(cmdsLists), cmdsLists);
 
     // Wait until initialization is complete.
@@ -199,14 +199,14 @@ void BoxApp::Draw(const GameTimer& gt)
 
     // A command list can be reset after it has been added to the command queue via ExecuteCommandList.
     // Reusing the command list reuses memory.
-    //ThrowIfFailed(uCmdList->Reset(mDirectCmdListAlloc.Get(), mPSO.Get()));
-    uCmdList.Reset(mDirectCmdListAlloc.Get(), mPSO.Get());
+    //ThrowIfFailed(uGCmdList->Reset(mDirectCmdListAlloc.Get(), mPSO.Get()));
+    uGCmdList.Reset(mDirectCmdListAlloc.Get(), mPSO.Get());
 
     // 'RS' : Rasterizer
-    //uCmdList->RSSetViewports(1, &mScreenViewport);
-    //uCmdList->RSSetScissorRects(1, &mScissorRect);
-    uCmdList.RSSetViewport(mScreenViewport);
-    uCmdList.RSSetScissorRect(mScissorRect);
+    //uGCmdList->RSSetViewports(1, &mScreenViewport);
+    //uGCmdList->RSSetScissorRects(1, &mScissorRect);
+    uGCmdList.RSSetViewport(mScreenViewport);
+    uGCmdList.RSSetScissorRect(mScissorRect);
 
     fg.Clear();
     fgRsrcMngr.Clear();
@@ -234,23 +234,23 @@ void BoxApp::Draw(const GameTimer& gt)
         .RegisterPassRsrcs(pass, depthstencil, D3D12_RESOURCE_STATE_DEPTH_WRITE, dsvDesc);
 
     fgExecutor.RegisterPassFunc(pass, [&](const Ubpa::DX12::FG::PassRsrcs& rsrcs) {
-        uCmdList.ClearRenderTargetView(rsrcs.find(backbuffer)->second.cpuHandle, Colors::LightSteelBlue);
-        uCmdList.ClearDepthStencilView(rsrcs.find(depthstencil)->second.cpuHandle);
+        uGCmdList.ClearRenderTargetView(rsrcs.find(backbuffer)->second.cpuHandle, Colors::LightSteelBlue);
+        uGCmdList.ClearDepthStencilView(rsrcs.find(depthstencil)->second.cpuHandle);
 
-        uCmdList.OMSetRenderTarget(rsrcs.find(backbuffer)->second.cpuHandle, rsrcs.find(depthstencil)->second.cpuHandle);
+        uGCmdList.OMSetRenderTarget(rsrcs.find(backbuffer)->second.cpuHandle, rsrcs.find(depthstencil)->second.cpuHandle);
 
 #pragma region core
-        uCmdList.SetDescriptorHeaps(mCbvHeap.Get());
+        uGCmdList.SetDescriptorHeaps(mCbvHeap.Get());
 
-        uCmdList->SetGraphicsRootSignature(mRootSignature.Get());
+        uGCmdList->SetGraphicsRootSignature(mRootSignature.Get());
 
-        uCmdList->IASetVertexBuffers(0, 1, &mBoxGeo->VertexBufferView());
-        uCmdList->IASetIndexBuffer(&mBoxGeo->IndexBufferView());
-        uCmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        uGCmdList->IASetVertexBuffers(0, 1, &mBoxGeo->VertexBufferView());
+        uGCmdList->IASetIndexBuffer(&mBoxGeo->IndexBufferView());
+        uGCmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-        uCmdList->SetGraphicsRootDescriptorTable(0, mCbvHeap->GetGPUDescriptorHandleForHeapStart());
+        uGCmdList->SetGraphicsRootDescriptorTable(0, mCbvHeap->GetGPUDescriptorHandleForHeapStart());
 
-        uCmdList.DrawIndexed(mBoxGeo->DrawArgs["box"].IndexCount, 0, 0);
+        uGCmdList.DrawIndexed(mBoxGeo->DrawArgs["box"].IndexCount, 0, 0);
 #pragma endregion
         });
 
@@ -258,13 +258,13 @@ void BoxApp::Draw(const GameTimer& gt)
     fgExecutor.Execute(fg, crst, fgRsrcMngr);
 
     // Done recording commands.
-	//ThrowIfFailed(uCmdList->Close());
-    uCmdList->Close();
+	//ThrowIfFailed(uGCmdList->Close());
+    uGCmdList->Close();
  
     // Add the command list to the queue for execution.
-	//ID3D12CommandList* cmdsLists[] = { uCmdList.raw.Get() };
+	//ID3D12CommandList* cmdsLists[] = { uGCmdList.raw.Get() };
 	//mCommandQueue->ExecuteCommandLists(_countof(cmdsLists), cmdsLists);
-    uCmdList.Execute(mCommandQueue.Get());
+    uGCmdList.Execute(mCommandQueue.Get());
 	
 	// swap the back and front buffers
 	ThrowIfFailed(mSwapChain->Present(0, 0));
@@ -470,10 +470,10 @@ void BoxApp::BuildBoxGeometry()
     vertexbuffer.Create(indices.data(), ibByteSize);
 
 	mBoxGeo->VertexBufferGPU = d3dUtil::CreateDefaultBuffer(md3dDevice.Get(),
-        uCmdList.raw.Get(), vertices.data(), vbByteSize, mBoxGeo->VertexBufferUploader);
+        uGCmdList.raw.Get(), vertices.data(), vbByteSize, mBoxGeo->VertexBufferUploader);
 
 	mBoxGeo->IndexBufferGPU = d3dUtil::CreateDefaultBuffer(md3dDevice.Get(),
-        uCmdList.raw.Get(), indices.data(), ibByteSize, mBoxGeo->IndexBufferUploader);
+        uGCmdList.raw.Get(), indices.data(), ibByteSize, mBoxGeo->IndexBufferUploader);
 
 	mBoxGeo->VertexByteStride = sizeof(Vertex);
 	mBoxGeo->VertexBufferByteSize = vbByteSize;

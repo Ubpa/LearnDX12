@@ -5,13 +5,13 @@
 
 using Microsoft::WRL::ComPtr;
 
-DxException::DxException(HRESULT hr, const std::wstring& functionName, const std::wstring& filename, int lineNumber) :
-    ErrorCode(hr),
-    FunctionName(functionName),
-    Filename(filename),
-    LineNumber(lineNumber)
-{
-}
+//Ubpa::DX12::Exception::Ubpa::DX12::Exception(HRESULT hr, const std::wstring& functionName, const std::wstring& filename, int lineNumber) :
+//    ErrorCode(hr),
+//    FunctionName(functionName),
+//    Filename(filename),
+//    LineNumber(lineNumber)
+//{
+//}
 
 bool d3dUtil::IsKeyDown(int vkeyCode)
 {
@@ -113,13 +113,13 @@ ComPtr<ID3DBlob> d3dUtil::CompileShader(
 	return byteCode;
 }
 
-std::wstring DxException::ToString()const
-{
-    // Get the string description of the error code.
-    _com_error err(ErrorCode);
-    std::wstring msg = err.ErrorMessage();
-
-    return FunctionName + L" failed in " + Filename + L"; line " + std::to_wstring(LineNumber) + L"; error: " + msg;
-}
+//std::wstring Ubpa::DX12::Exception::ToString()const
+//{
+//    // Get the string description of the error code.
+//    _com_error err(ErrorCode);
+//    std::wstring msg = err.ErrorMessage();
+//
+//    return FunctionName + L" failed in " + Filename + L"; line " + std::to_wstring(LineNumber) + L"; error: " + msg;
+//}
 
 

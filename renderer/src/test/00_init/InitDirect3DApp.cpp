@@ -7,7 +7,6 @@
 //***************************************************************************************
 
 #include "../../common/d3dApp.h"
-#include "../../core/core.h"
 
 #include <DirectXColors.h>
 
@@ -44,7 +43,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prevInstance,
 
         return theApp.Run();
     }
-    catch(DxException& e)
+    catch(Ubpa::DX12::Exception& e)
     {
         MessageBox(nullptr, e.ToString().c_str(), L"HR Failed", MB_OK);
         return 0;
@@ -84,49 +83,49 @@ void InitDirect3DApp::Draw(const GameTimer& gt)
     // We can only reset when the associated command lists have finished execution on the GPU.
 	ThrowIfFailed(mDirectCmdListAlloc->Reset());
 
-	// Ubpa::DX12::GraphicsCommandList
-	Ubpa::DX12::GraphicsCommandList commandlist{ uCmdList };
+	// Ubpa::DX12::GCmdList
+	Ubpa::DX12::GCmdList uGCmdList{ mCommandList };
 
 	// A command list can be reset after it has been added to the command queue via ExecuteCommandList.
     // Reusing the command list reuses memory.
-    //ThrowIfFailed(uCmdList->Reset(mDirectCmdListAlloc.Get(), nullptr));
-	commandlist.Reset(mDirectCmdListAlloc.Get());
+    //ThrowIfFailed(uGCmdList->Reset(mDirectCmdListAlloc.Get(), nullptr));
+	uGCmdList.Reset(mDirectCmdListAlloc.Get());
 
 	// Indicate a state transition on the resource usage.
-	//uCmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
+	//uGCmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
 	//	D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET));
-	commandlist.ResourceBarrier(CurrentBackBuffer(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
+	uGCmdList.ResourceBarrier(CurrentBackBuffer(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
 
     // Set the viewport and scissor rect.  This needs to be reset whenever the command list is reset.
-    //uCmdList->RSSetViewports(1, &mScreenViewport);
-	//uCmdList->RSSetScissorRects(1, &mScissorRect);
-	commandlist.RSSetViewport(mScreenViewport);
-	commandlist.RSSetScissorRect(mScissorRect);
+    //uGCmdList->RSSetViewports(1, &mScreenViewport);
+	//uGCmdList->RSSetScissorRects(1, &mScissorRect);
+	uGCmdList.RSSetViewport(mScreenViewport);
+	uGCmdList.RSSetScissorRect(mScissorRect);
 
     // Clear the back buffer and depth buffer.
-	//uCmdList->ClearRenderTargetView(CurrentBackBufferView(), Colors::LightSteelBlue, 0, nullptr);
-	//uCmdList->ClearDepthStencilView(DepthStencilView(), D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
-	commandlist.ClearRenderTargetView(CurrentBackBufferView(), Colors::LightSteelBlue);
-	commandlist.ClearDepthStencilView(DepthStencilView());
+	//uGCmdList->ClearRenderTargetView(CurrentBackBufferView(), Colors::LightSteelBlue, 0, nullptr);
+	//uGCmdList->ClearDepthStencilView(DepthStencilView(), D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
+	uGCmdList.ClearRenderTargetView(CurrentBackBufferView(), Colors::LightSteelBlue);
+	uGCmdList.ClearDepthStencilView(DepthStencilView());
 	
     // Specify the buffers we are going to render to.
 	// 'OM' -> Output Merge
-	// uCmdList->OMSetRenderTargets(1, &CurrentBackBufferView(), true, &DepthStencilView());
-	commandlist.OMSetRenderTarget(CurrentBackBufferView(), DepthStencilView());
+	// uGCmdList->OMSetRenderTargets(1, &CurrentBackBufferView(), true, &DepthStencilView());
+	uGCmdList.OMSetRenderTarget(CurrentBackBufferView(), DepthStencilView());
 	
     // Indicate a state transition on the resource usage.
-	//uCmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
+	//uGCmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
 	//	D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
-	commandlist.ResourceBarrier(CurrentBackBuffer(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
+	uGCmdList.ResourceBarrier(CurrentBackBuffer(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
 
     // Done recording commands.
-	//ThrowIfFailed(uCmdList->Close());
-	commandlist->Close();
+	//ThrowIfFailed(uGCmdList->Close());
+	uGCmdList->Close();
 
     // Add the command list to the queue for execution.
-	//ID3D12CommandList* cmdsLists[] = { uCmdList.Get() };
+	//ID3D12CommandList* cmdsLists[] = { uGCmdList.Get() };
 	//mCommandQueue->ExecuteCommandLists(_countof(cmdsLists), cmdsLists);
-	commandlist.Execute(mCommandQueue.Get());
+	uGCmdList.Execute(mCommandQueue.Get());
 	
 	// swap the back and front buffers
 	ThrowIfFailed(mSwapChain->Present(0, 0));

@@ -4,13 +4,13 @@
 // Hold down '1' key to view scene in wireframe mode.
 //***************************************************************************************
 
+#include "../../dx12fg/dx12fg.h"
+
 #include "../../common/d3dApp.h"
 #include "../../common/MathHelper.h"
 #include "../../common/UploadBuffer.h"
 #include "../../common/GeometryGenerator.h"
 #include "FrameResource.h"
-
-#include "../../dx12fg/dx12fg.h"
 
 #include <UFG/FrameGraph.h>
 
@@ -125,7 +125,7 @@ private:
     POINT mLastMousePos;
 
     // Ubpa::DX12
-    Ubpa::DX12::GraphicsCommandList uCmdList;
+    Ubpa::DX12::GCmdList uGCmdList;
     Ubpa::DX12::Device uDevice;
     Ubpa::DX12::FG::RsrcMngr fgRsrcMngr;
     Ubpa::DX12::FG::Executor fgExecutor;
@@ -149,7 +149,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prevInstance,
 
         return theApp.Run();
     }
-    catch(DxException& e)
+    catch(Ubpa::DX12::Exception& e)
     {
         MessageBox(nullptr, e.ToString().c_str(), L"HR Failed", MB_OK);
         return 0;
@@ -173,12 +173,12 @@ bool ShapesApp::Initialize()
         return false;
 
     // Ubpa::DX12
-    uCmdList = { mCommandList };
+    uGCmdList = { mCommandList };
     uDevice = { md3dDevice };
-    fgRsrcMngr.Init(uCmdList, uDevice);
+    fgRsrcMngr.Init(uGCmdList, uDevice);
 
     // Reset the command list to prep for initialization commands.
-    ThrowIfFailed(uCmdList->Reset(mDirectCmdListAlloc.Get(), nullptr));
+    ThrowIfFailed(uGCmdList->Reset(mDirectCmdListAlloc.Get(), nullptr));
 
     BuildRootSignature(); // 无新内容
     BuildShadersAndInputLayout(); // 无新内容
@@ -190,8 +190,8 @@ bool ShapesApp::Initialize()
     BuildPSOs(); // 2 个 PSO（solid，frame）
 
     // Execute the initialization commands.
-    ThrowIfFailed(uCmdList->Close());
-    ID3D12CommandList* cmdsLists[] = { uCmdList.raw.Get() };
+    ThrowIfFailed(uGCmdList->Close());
+    ID3D12CommandList* cmdsLists[] = { uGCmdList.raw.Get() };
     mCommandQueue->ExecuteCommandLists(_countof(cmdsLists), cmdsLists);
 
     // Wait until initialization is complete.
@@ -244,15 +244,15 @@ void ShapesApp::Draw(const GameTimer& gt)
     // Reusing the command list reuses memory.
     if(mIsWireframe)
     {
-        ThrowIfFailed(uCmdList->Reset(cmdListAlloc.Get(), mPSOs["opaque_wireframe"].Get()));
+        ThrowIfFailed(uGCmdList->Reset(cmdListAlloc.Get(), mPSOs["opaque_wireframe"].Get()));
     }
     else
     {
-        ThrowIfFailed(uCmdList->Reset(cmdListAlloc.Get(), mPSOs["opaque"].Get()));
+        ThrowIfFailed(uGCmdList->Reset(cmdListAlloc.Get(), mPSOs["opaque"].Get()));
     }
 
-    uCmdList->RSSetViewports(1, &mScreenViewport);
-    uCmdList->RSSetScissorRects(1, &mScissorRect);
+    uGCmdList->RSSetViewports(1, &mScreenViewport);
+    uGCmdList->RSSetScissorRects(1, &mScissorRect);
 
     fg.Clear();
     fgRsrcMngr.Clear();
@@ -283,22 +283,22 @@ void ShapesApp::Draw(const GameTimer& gt)
         pass,
         [&](const Ubpa::DX12::FG::PassRsrcs& rsrcs) {
             // Clear the back buffer and depth buffer.
-            uCmdList.ClearRenderTargetView(rsrcs.find(backbuffer)->second.cpuHandle, Colors::LightSteelBlue);
-            uCmdList.ClearDepthStencilView(rsrcs.find(depthstencil)->second.cpuHandle);
+            uGCmdList.ClearRenderTargetView(rsrcs.find(backbuffer)->second.cpuHandle, Colors::LightSteelBlue);
+            uGCmdList.ClearDepthStencilView(rsrcs.find(depthstencil)->second.cpuHandle);
 
             // Specify the buffers we are going to render to.
-            uCmdList.OMSetRenderTarget(rsrcs.find(backbuffer)->second.cpuHandle, rsrcs.find(depthstencil)->second.cpuHandle);
+            uGCmdList.OMSetRenderTarget(rsrcs.find(backbuffer)->second.cpuHandle, rsrcs.find(depthstencil)->second.cpuHandle);
 
-            uCmdList.SetDescriptorHeaps(mCbvHeap.Get());
+            uGCmdList.SetDescriptorHeaps(mCbvHeap.Get());
 
-            uCmdList->SetGraphicsRootSignature(mRootSignature.Get());
+            uGCmdList->SetGraphicsRootSignature(mRootSignature.Get());
 
             int passCbvIndex = mPassCbvOffset + mCurrFrameResourceIndex;
             auto passCbvHandle = CD3DX12_GPU_DESCRIPTOR_HANDLE(mCbvHeap->GetGPUDescriptorHandleForHeapStart());
             passCbvHandle.Offset(passCbvIndex, mCbvSrvUavDescriptorSize);
-            uCmdList->SetGraphicsRootDescriptorTable(1, passCbvHandle);
+            uGCmdList->SetGraphicsRootDescriptorTable(1, passCbvHandle);
 
-            DrawRenderItems(uCmdList.raw.Get(), mOpaqueRitems);
+            DrawRenderItems(uGCmdList.raw.Get(), mOpaqueRitems);
         }
     );
 
@@ -306,10 +306,10 @@ void ShapesApp::Draw(const GameTimer& gt)
     fgExecutor.Execute(fg, crst, fgRsrcMngr);
 
     // Done recording commands.
-    ThrowIfFailed(uCmdList->Close());
+    ThrowIfFailed(uGCmdList->Close());
 
     // Add the command list to the queue for execution.
-    uCmdList.Execute(mCommandQueue.Get());
+    uGCmdList.Execute(mCommandQueue.Get());
 
     // Swap the back and front buffers
     ThrowIfFailed(mSwapChain->Present(0, 0));
@@ -671,10 +671,10 @@ void ShapesApp::BuildShapeGeometry()
 	CopyMemory(geo->IndexBufferCPU->GetBufferPointer(), indices.data(), ibByteSize);
 
 	geo->VertexBufferGPU = d3dUtil::CreateDefaultBuffer(md3dDevice.Get(),
-		uCmdList.raw.Get(), vertices.data(), vbByteSize, geo->VertexBufferUploader);
+		uGCmdList.raw.Get(), vertices.data(), vbByteSize, geo->VertexBufferUploader);
 
 	geo->IndexBufferGPU = d3dUtil::CreateDefaultBuffer(md3dDevice.Get(),
-		uCmdList.raw.Get(), indices.data(), ibByteSize, geo->IndexBufferUploader);
+		uGCmdList.raw.Get(), indices.data(), ibByteSize, geo->IndexBufferUploader);
 
 	geo->VertexByteStride = sizeof(Vertex);
 	geo->VertexBufferByteSize = vbByteSize;

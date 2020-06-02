@@ -9,7 +9,7 @@
 namespace Ubpa::DX12::FG {
 	class RsrcMngr {
 	public:
-		void Init(GraphicsCommandList uGCmdList, Device uDevice) {
+		void Init(GCmdList uGCmdList, Device uDevice) {
 			this->uGCmdList = uGCmdList;
 			this->uDevice = uDevice;
 		}
@@ -41,7 +41,7 @@ namespace Ubpa::DX12::FG {
 		}
 
 	private:
-		GraphicsCommandList uGCmdList;
+		GCmdList uGCmdList;
 		Device uDevice;
 
 		// type -> vector<view>

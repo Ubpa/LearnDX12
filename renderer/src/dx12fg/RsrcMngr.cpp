@@ -16,7 +16,7 @@ void FG::RsrcMngr::Clear() {
 	UINT rtvDH_target_size = 128;
 	UINT dsvDH_target_size = 128;
 
-	if (srvDH.pDH.Get() == nullptr || srvDH.pDH->GetDesc().NumDescriptors < srvDH_target_size) {
+	if (srvDH.IsNull() || srvDH.raw->GetDesc().NumDescriptors < srvDH_target_size) {
 		srvDH.Create(uDevice.raw.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, srvDH_target_size, true);
 		srvDHfree.clear();
 		for (UINT i = 0; i < srvDH_target_size; i++)
@@ -27,7 +27,7 @@ void FG::RsrcMngr::Clear() {
 			srvDHfree.push_back(i);
 	}
 
-	if (rtvDH.pDH.Get() == nullptr || rtvDH.pDH->GetDesc().NumDescriptors < rtvDH_target_size) {
+	if (rtvDH.IsNull() || rtvDH.raw->GetDesc().NumDescriptors < rtvDH_target_size) {
 		rtvDH.Create(uDevice.raw.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_RTV, rtvDH_target_size, false);
 		rtvDHfree.clear();
 		for (UINT i = 0; i < rtvDH_target_size; i++)
@@ -38,7 +38,7 @@ void FG::RsrcMngr::Clear() {
 			rtvDHfree.push_back(i);
 	}
 
-	if (dsvDH.pDH.Get() == nullptr || dsvDH.pDH->GetDesc().NumDescriptors < dsvDH_target_size) {
+	if (dsvDH.IsNull() || dsvDH.raw->GetDesc().NumDescriptors < dsvDH_target_size) {
 		dsvDH.Create(uDevice.raw.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_DSV, dsvDH_target_size, false);
 		dsvDHfree.clear();
 		for (UINT i = 0; i < dsvDH_target_size; i++)
