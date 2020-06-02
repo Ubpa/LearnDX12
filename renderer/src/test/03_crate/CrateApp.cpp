@@ -133,6 +133,7 @@ private:
 
 	// Ubpa::DX12
 	Ubpa::DX12::GCmdList uGCmdList;
+	Ubpa::DX12::CmdQueue uCmdQueue;
 	Ubpa::DX12::Device uDevice;
 	Ubpa::DX12::FG::RsrcMngr fgRsrcMngr;
 	Ubpa::DX12::FG::Executor fgExecutor;
@@ -178,6 +179,12 @@ bool CrateApp::Initialize()
 {
     if(!D3DApp::Initialize())
         return false;
+
+	// Ubpa::DX12
+	uGCmdList = { mCommandList };
+	uCmdQueue = { mCommandQueue };
+	uDevice = { md3dDevice };
+	fgRsrcMngr.Init(uGCmdList, uDevice);
 
     // Reset the command list to prep for initialization commands.
     ThrowIfFailed(mCommandList->Reset(mDirectCmdListAlloc.Get(), nullptr));
@@ -252,42 +259,92 @@ void CrateApp::Draw(const GameTimer& gt)
 
     // A command list can be reset after it has been added to the command queue via ExecuteCommandList.
     // Reusing the command list reuses memory.
-    ThrowIfFailed(mCommandList->Reset(cmdListAlloc.Get(), mOpaquePSO.Get()));
+    ThrowIfFailed(uGCmdList->Reset(cmdListAlloc.Get(), mOpaquePSO.Get()));
 
-    mCommandList->RSSetViewports(1, &mScreenViewport);
-    mCommandList->RSSetScissorRects(1, &mScissorRect);
+	uGCmdList->RSSetViewports(1, &mScreenViewport);
+	uGCmdList->RSSetScissorRects(1, &mScissorRect);
 
-    // Indicate a state transition on the resource usage.
-	mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
-		D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET));
+	fg.Clear();
+	fgRsrcMngr.Clear();
+	fgExecutor.Clear();
 
-    // Clear the back buffer and depth buffer.
-    mCommandList->ClearRenderTargetView(CurrentBackBufferView(), Colors::LightSteelBlue, 0, nullptr);
-    mCommandList->ClearDepthStencilView(DepthStencilView(), D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
+	auto backbuffer = fg.AddResourceNode("Back Buffer");
+	auto depthstencil = fg.AddResourceNode("Depth Stencil");
+	auto pass = fg.AddPassNode(
+		"Pass",
+		{},
+		{ backbuffer,depthstencil }
+	);
 
-    // Specify the buffers we are going to render to.
-    mCommandList->OMSetRenderTargets(1, &CurrentBackBufferView(), true, &DepthStencilView());
+	D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc;
+	dsvDesc.Flags = D3D12_DSV_FLAG_NONE;
+	dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+	dsvDesc.Format = mDepthStencilFormat;
+	dsvDesc.Texture2D.MipSlice = 0;
 
-	ID3D12DescriptorHeap* descriptorHeaps[] = { mSrvDescriptorHeap.Get() };
-	mCommandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+	fgRsrcMngr
+		.RegisterImportedRsrc(backbuffer, { CurrentBackBuffer(), D3D12_RESOURCE_STATE_PRESENT })
+		.RegisterImportedRsrc(depthstencil, { mDepthStencilBuffer.Get(), D3D12_RESOURCE_STATE_PRESENT })
+		.RegisterPassRsrcs(pass, backbuffer, D3D12_RESOURCE_STATE_RENDER_TARGET,
+			Ubpa::DX12::FG::RsrcImplDesc_RTV_Null{})
+		.RegisterPassRsrcs(pass, depthstencil, D3D12_RESOURCE_STATE_DEPTH_WRITE, dsvDesc);
 
-	mCommandList->SetGraphicsRootSignature(mRootSignature.Get());
+	fgExecutor.RegisterPassFunc(
+		pass,
+		[&](const Ubpa::DX12::FG::PassRsrcs& rsrcs) {
+			// Clear the back buffer and depth buffer.
+			uGCmdList.ClearRenderTargetView(rsrcs.find(backbuffer)->second.cpuHandle, Colors::LightSteelBlue);
+			uGCmdList.ClearDepthStencilView(rsrcs.find(depthstencil)->second.cpuHandle);
 
-	auto passCB = mCurrFrameResource->PassCB->Resource();
-	mCommandList->SetGraphicsRootConstantBufferView(2, passCB->GetGPUVirtualAddress());
+			// Specify the buffers we are going to render to.
+			uGCmdList.OMSetRenderTarget(rsrcs.find(backbuffer)->second.cpuHandle, rsrcs.find(depthstencil)->second.cpuHandle);
 
-    DrawRenderItems(mCommandList.Get(), mOpaqueRitems);
+			uGCmdList.SetDescriptorHeaps(mSrvDescriptorHeap.Get());
 
-    // Indicate a state transition on the resource usage.
-	mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
-		D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
+			uGCmdList->SetGraphicsRootSignature(mRootSignature.Get());
+
+			auto passCB = mCurrFrameResource->PassCB->Resource();
+			uGCmdList->SetGraphicsRootConstantBufferView(2, passCB->GetGPUVirtualAddress());
+
+			DrawRenderItems(uGCmdList.raw.Get(), mOpaqueRitems);
+
+			DrawRenderItems(uGCmdList.raw.Get(), mOpaqueRitems);
+		}
+	);
+
+ //   // Indicate a state transition on the resource usage.
+	//mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
+	//	D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET));
+
+ //   // Clear the back buffer and depth buffer.
+ //   mCommandList->ClearRenderTargetView(CurrentBackBufferView(), Colors::LightSteelBlue, 0, nullptr);
+ //   mCommandList->ClearDepthStencilView(DepthStencilView(), D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
+
+ //   // Specify the buffers we are going to render to.
+ //   mCommandList->OMSetRenderTargets(1, &CurrentBackBufferView(), true, &DepthStencilView());
+
+	//ID3D12DescriptorHeap* descriptorHeaps[] = { mSrvDescriptorHeap.Get() };
+	//mCommandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+
+	//mCommandList->SetGraphicsRootSignature(mRootSignature.Get());
+
+	//auto passCB = mCurrFrameResource->PassCB->Resource();
+	//mCommandList->SetGraphicsRootConstantBufferView(2, passCB->GetGPUVirtualAddress());
+
+ //   DrawRenderItems(mCommandList.Get(), mOpaqueRitems);
+
+ //   // Indicate a state transition on the resource usage.
+	//mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
+	//	D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
+
+	auto [success, crst] = fgCompiler.Compile(fg);
+	fgExecutor.Execute(fg, crst, fgRsrcMngr);
 
     // Done recording commands.
-    ThrowIfFailed(mCommandList->Close());
+    ThrowIfFailed(uGCmdList->Close());
 
     // Add the command list to the queue for execution.
-    ID3D12CommandList* cmdsLists[] = { mCommandList.Get() };
-    mCommandQueue->ExecuteCommandLists(_countof(cmdsLists), cmdsLists);
+	uCmdQueue.Execute(uGCmdList.raw.Get());
 
     // Swap the back and front buffers
     ThrowIfFailed(mSwapChain->Present(0, 0));
@@ -527,15 +584,7 @@ void CrateApp::BuildDescriptorHeaps()
 
 	auto woodCrateTex = mTextures["woodCrateTex"]->Resource;
  
-	D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-	srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-	srvDesc.Format = woodCrateTex->GetDesc().Format;
-	srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-	srvDesc.Texture2D.MostDetailedMip = 0;
-	srvDesc.Texture2D.MipLevels = woodCrateTex->GetDesc().MipLevels;
-	srvDesc.Texture2D.ResourceMinLODClamp = 0.0f;
-
-	md3dDevice->CreateShaderResourceView(woodCrateTex.Get(), &srvDesc, hDescriptor);
+	uDevice.CreateSRV_Tex2D(woodCrateTex.Get(), hDescriptor);
 }
 
 void CrateApp::BuildShadersAndInputLayout()
