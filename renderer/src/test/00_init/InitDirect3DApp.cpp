@@ -123,9 +123,8 @@ void InitDirect3DApp::Draw(const GameTimer& gt)
 	uGCmdList->Close();
 
     // Add the command list to the queue for execution.
-	//ID3D12CommandList* cmdsLists[] = { uGCmdList.Get() };
-	//mCommandQueue->ExecuteCommandLists(_countof(cmdsLists), cmdsLists);
-	uGCmdList.Execute(mCommandQueue.Get());
+	ID3D12CommandList* cmdsLists[] = { uGCmdList.raw.Get() };
+	mCommandQueue->ExecuteCommandLists(_countof(cmdsLists), cmdsLists);
 	
 	// swap the back and front buffers
 	ThrowIfFailed(mSwapChain->Present(0, 0));

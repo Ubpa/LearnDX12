@@ -589,8 +589,8 @@ void DeferApp::BuildDescriptorHeaps()
 
 void DeferApp::BuildShadersAndInputLayout()
 {
-	mShaders["standardVS"] = d3dUtil::CompileShader(L"..\\data\\shaders\\04_defer\\Default.hlsl", nullptr, "VS", "vs_5_0");
-	mShaders["opaquePS"] = d3dUtil::CompileShader(L"..\\data\\shaders\\04_defer\\Default.hlsl", nullptr, "PS", "ps_5_0");
+	mShaders["standardVS"] = Ubpa::DX12::CompileShader(L"..\\data\\shaders\\04_defer\\Default.hlsl", nullptr, "VS", "vs_5_0");
+	mShaders["opaquePS"] = Ubpa::DX12::CompileShader(L"..\\data\\shaders\\04_defer\\Default.hlsl", nullptr, "PS", "ps_5_0");
 	
     mInputLayout =
     {
@@ -634,10 +634,10 @@ void DeferApp::BuildShapeGeometry()
 	ThrowIfFailed(D3DCreateBlob(ibByteSize, &geo->IndexBufferCPU));
 	CopyMemory(geo->IndexBufferCPU->GetBufferPointer(), indices.data(), ibByteSize);
 
-	geo->VertexBufferGPU = d3dUtil::CreateDefaultBuffer(md3dDevice.Get(),
+	geo->VertexBufferGPU = Ubpa::DX12::CreateDefaultBuffer(md3dDevice.Get(),
 		mCommandList.Get(), vertices.data(), vbByteSize, geo->VertexBufferUploader);
 
-	geo->IndexBufferGPU = d3dUtil::CreateDefaultBuffer(md3dDevice.Get(),
+	geo->IndexBufferGPU = Ubpa::DX12::CreateDefaultBuffer(md3dDevice.Get(),
 		mCommandList.Get(), indices.data(), ibByteSize, geo->IndexBufferUploader);
 
 	geo->VertexByteStride = sizeof(Vertex);
@@ -724,8 +724,8 @@ void DeferApp::BuildRenderItems()
 
 void DeferApp::DrawRenderItems(ID3D12GraphicsCommandList* cmdList, const std::vector<RenderItem*>& ritems)
 {
-    UINT objCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(ObjectConstants));
-    UINT matCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(MaterialConstants));
+    UINT objCBByteSize = Ubpa::DX12::CalcConstantBufferByteSize(sizeof(ObjectConstants));
+    UINT matCBByteSize = Ubpa::DX12::CalcConstantBufferByteSize(sizeof(MaterialConstants));
  
 	auto objectCB = mCurrFrameResource->ObjectCB->Resource();
 	auto matCB = mCurrFrameResource->MaterialCB->Resource();

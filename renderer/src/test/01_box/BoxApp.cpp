@@ -87,6 +87,7 @@ private:
 
     // Ubpa::DX12
     Ubpa::DX12::GCmdList uGCmdList;
+    Ubpa::DX12::CmdQueue uCmdQueue;
     Ubpa::DX12::Device uDevice;
     Ubpa::DX12::FG::RsrcMngr fgRsrcMngr;
     Ubpa::DX12::FG::Executor fgExecutor;
@@ -133,6 +134,7 @@ bool BoxApp::Initialize()
 
     // Ubpa::DX12
     uGCmdList = { mCommandList };
+    uCmdQueue = { mCommandQueue };
     uDevice = { md3dDevice };
     fgRsrcMngr.Init(uGCmdList, uDevice);
 
@@ -264,7 +266,7 @@ void BoxApp::Draw(const GameTimer& gt)
     // Add the command list to the queue for execution.
 	//ID3D12CommandList* cmdsLists[] = { uGCmdList.raw.Get() };
 	//mCommandQueue->ExecuteCommandLists(_countof(cmdsLists), cmdsLists);
-    uGCmdList.Execute(mCommandQueue.Get());
+    uCmdQueue.Execute(uGCmdList.raw.Get());
 	
 	// swap the back and front buffers
 	ThrowIfFailed(mSwapChain->Present(0, 0));
@@ -335,7 +337,7 @@ void BoxApp::BuildConstantBuffers()
 
 	mObjectCB = std::make_unique<UploadBuffer<ObjectConstants>>(md3dDevice.Get(), 1, true);
 
-	UINT objCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(ObjectConstants));
+	UINT objCBByteSize = Ubpa::DX12::CalcConstantBufferByteSize(sizeof(ObjectConstants));
 
 	D3D12_GPU_VIRTUAL_ADDRESS cbAddress = mObjectCB->Resource()->GetGPUVirtualAddress();
     // Offset to the ith object constant buffer in the buffer.
@@ -346,7 +348,7 @@ void BoxApp::BuildConstantBuffers()
     // > format 由 shader 解释
 	D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc;
 	cbvDesc.BufferLocation = cbAddress;
-	cbvDesc.SizeInBytes = d3dUtil::CalcConstantBufferByteSize(sizeof(ObjectConstants));
+	cbvDesc.SizeInBytes = Ubpa::DX12::CalcConstantBufferByteSize(sizeof(ObjectConstants));
 
 	md3dDevice->CreateConstantBufferView(
 		&cbvDesc,
@@ -401,8 +403,8 @@ void BoxApp::BuildRootSignature()
 
 void BoxApp::BuildShadersAndInputLayout()
 {
-	mvsByteCode = d3dUtil::CompileShader(L"..\\data\\shaders\\01_box\\color.hlsl", nullptr, "VS", "vs_5_0");
-	mpsByteCode = d3dUtil::CompileShader(L"..\\data\\shaders\\01_box\\color.hlsl", nullptr, "PS", "ps_5_0");
+	mvsByteCode = Ubpa::DX12::CompileShader(L"..\\data\\shaders\\01_box\\color.hlsl", nullptr, "VS", "vs_5_0");
+	mpsByteCode = Ubpa::DX12::CompileShader(L"..\\data\\shaders\\01_box\\color.hlsl", nullptr, "PS", "ps_5_0");
 
     mInputLayout =
     {
@@ -469,10 +471,10 @@ void BoxApp::BuildBoxGeometry()
     Ubpa::DX12::Blob indexbuffer{ mBoxGeo->IndexBufferCPU };
     vertexbuffer.Create(indices.data(), ibByteSize);
 
-	mBoxGeo->VertexBufferGPU = d3dUtil::CreateDefaultBuffer(md3dDevice.Get(),
+	mBoxGeo->VertexBufferGPU = Ubpa::DX12::CreateDefaultBuffer(md3dDevice.Get(),
         uGCmdList.raw.Get(), vertices.data(), vbByteSize, mBoxGeo->VertexBufferUploader);
 
-	mBoxGeo->IndexBufferGPU = d3dUtil::CreateDefaultBuffer(md3dDevice.Get(),
+	mBoxGeo->IndexBufferGPU = Ubpa::DX12::CreateDefaultBuffer(md3dDevice.Get(),
         uGCmdList.raw.Get(), indices.data(), ibByteSize, mBoxGeo->IndexBufferUploader);
 
 	mBoxGeo->VertexByteStride = sizeof(Vertex);

@@ -126,6 +126,7 @@ private:
 
     // Ubpa::DX12
     Ubpa::DX12::GCmdList uGCmdList;
+    Ubpa::DX12::CmdQueue uCmdQueue;
     Ubpa::DX12::Device uDevice;
     Ubpa::DX12::FG::RsrcMngr fgRsrcMngr;
     Ubpa::DX12::FG::Executor fgExecutor;
@@ -174,6 +175,7 @@ bool ShapesApp::Initialize()
 
     // Ubpa::DX12
     uGCmdList = { mCommandList };
+    uCmdQueue = { mCommandQueue };
     uDevice = { md3dDevice };
     fgRsrcMngr.Init(uGCmdList, uDevice);
 
@@ -309,7 +311,7 @@ void ShapesApp::Draw(const GameTimer& gt)
     ThrowIfFailed(uGCmdList->Close());
 
     // Add the command list to the queue for execution.
-    uGCmdList.Execute(mCommandQueue.Get());
+    uCmdQueue.Execute(uGCmdList.raw.Get());
 
     // Swap the back and front buffers
     ThrowIfFailed(mSwapChain->Present(0, 0));
@@ -465,7 +467,7 @@ void ShapesApp::BuildDescriptorHeaps()
 
 void ShapesApp::BuildConstantBufferViews()
 {
-    UINT objCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(ObjectConstants));
+    UINT objCBByteSize = Ubpa::DX12::CalcConstantBufferByteSize(sizeof(ObjectConstants));
 
     UINT objCount = (UINT)mOpaqueRitems.size();
 
@@ -493,7 +495,7 @@ void ShapesApp::BuildConstantBufferViews()
         }
     }
 
-    UINT passCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(PassConstants));
+    UINT passCBByteSize = Ubpa::DX12::CalcConstantBufferByteSize(sizeof(PassConstants));
 
     // Last three descriptors are the pass CBVs for each frame resource.
     for(int frameIndex = 0; frameIndex < gNumFrameResources; ++frameIndex)
@@ -554,8 +556,8 @@ void ShapesApp::BuildRootSignature()
 
 void ShapesApp::BuildShadersAndInputLayout()
 {
-	mShaders["standardVS"] = d3dUtil::CompileShader(L"..\\data\\shaders\\02_shape\\color.hlsl", nullptr, "VS", "vs_5_1");
-	mShaders["opaquePS"] = d3dUtil::CompileShader(L"..\\data\\shaders\\02_shape\\color.hlsl", nullptr, "PS", "ps_5_1");
+	mShaders["standardVS"] = Ubpa::DX12::CompileShader(L"..\\data\\shaders\\02_shape\\color.hlsl", nullptr, "VS", "vs_5_1");
+	mShaders["opaquePS"] = Ubpa::DX12::CompileShader(L"..\\data\\shaders\\02_shape\\color.hlsl", nullptr, "PS", "ps_5_1");
 	
     mInputLayout =
     {
@@ -670,10 +672,10 @@ void ShapesApp::BuildShapeGeometry()
 	ThrowIfFailed(D3DCreateBlob(ibByteSize, &geo->IndexBufferCPU));
 	CopyMemory(geo->IndexBufferCPU->GetBufferPointer(), indices.data(), ibByteSize);
 
-	geo->VertexBufferGPU = d3dUtil::CreateDefaultBuffer(md3dDevice.Get(),
+	geo->VertexBufferGPU = Ubpa::DX12::CreateDefaultBuffer(md3dDevice.Get(),
 		uGCmdList.raw.Get(), vertices.data(), vbByteSize, geo->VertexBufferUploader);
 
-	geo->IndexBufferGPU = d3dUtil::CreateDefaultBuffer(md3dDevice.Get(),
+	geo->IndexBufferGPU = Ubpa::DX12::CreateDefaultBuffer(md3dDevice.Get(),
 		uGCmdList.raw.Get(), indices.data(), ibByteSize, geo->IndexBufferUploader);
 
 	geo->VertexByteStride = sizeof(Vertex);
@@ -823,7 +825,7 @@ void ShapesApp::BuildRenderItems()
 
 void ShapesApp::DrawRenderItems(ID3D12GraphicsCommandList* cmdList, const std::vector<RenderItem*>& ritems)
 {
-    UINT objCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(ObjectConstants));
+    UINT objCBByteSize = Ubpa::DX12::CalcConstantBufferByteSize(sizeof(ObjectConstants));
  
 	auto objectCB = mCurrFrameResource->ObjectCB->Resource();
 

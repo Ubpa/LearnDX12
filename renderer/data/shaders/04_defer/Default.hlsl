@@ -125,7 +125,9 @@ float4 PS(VertexOut pin) : SV_Target
     // Common convention to take alpha from diffuse material.
     litColor.a = diffuseAlbedo.a;
 
-    return litColor;
+    //return litColor;
+    float4 test = (1.0f, 0.0f, 1.0f, 1.0f);
+	return float4((pin.NormalW + float3(1.0f, 1.0f, 1.0f))/2.0f, 1.0f);
 }
 
 
