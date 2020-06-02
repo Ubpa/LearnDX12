@@ -8,11 +8,12 @@
 //   Hold the right mouse button down and move the mouse to zoom in and out.
 //***************************************************************************************
 
-#include "../../Common/d3dApp.h"
-#include "../../Common/MathHelper.h"
-#include "../../Common/UploadBuffer.h"
+#include "../../common/d3dApp.h"
+#include "../../common/MathHelper.h"
+#include "../../common/UploadBuffer.h"
 
 #include "../../core/core.h"
+
 #include "../../dx12fg/dx12fg.h"
 
 #include <UFG/FrameGraph.h>
@@ -89,6 +90,7 @@ private:
     Ubpa::DX12::Device uDevice;
     Ubpa::DX12::FG::RsrcMngr fgRsrcMngr;
     Ubpa::DX12::FG::Executor fgExecutor;
+    Ubpa::FG::Compiler fgCompiler;
     Ubpa::FG::FrameGraph fg;
 };
 
@@ -252,8 +254,7 @@ void BoxApp::Draw(const GameTimer& gt)
 #pragma endregion
         });
 
-    Ubpa::FG::Compiler compiler;
-    auto [success, crst] = compiler.Compile(fg);
+    auto [success, crst] = fgCompiler.Compile(fg);
     fgExecutor.Execute(fg, crst, fgRsrcMngr);
 
     // Done recording commands.
