@@ -130,15 +130,6 @@ private:
 	float mRadius = 2.5f;
 
     POINT mLastMousePos;
-
-	// Ubpa::DX12
-	Ubpa::DX12::GCmdList uGCmdList;
-	Ubpa::DX12::CmdQueue uCmdQueue;
-	Ubpa::DX12::Device uDevice;
-	Ubpa::DX12::FG::RsrcMngr fgRsrcMngr;
-	Ubpa::DX12::FG::Executor fgExecutor;
-	Ubpa::FG::Compiler fgCompiler;
-	Ubpa::FG::FrameGraph fg;
 };
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prevInstance,
@@ -157,7 +148,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prevInstance,
 
         return theApp.Run();
     }
-    catch(Ubpa::DX12::Exception& e)
+    catch(Ubpa::DX12::Util::Exception& e)
     {
         MessageBox(nullptr, e.ToString().c_str(), L"HR Failed", MB_OK);
         return 0;
@@ -171,7 +162,7 @@ DeferApp::DeferApp(HINSTANCE hInstance)
 
 DeferApp::~DeferApp()
 {
-    if(md3dDevice != nullptr)
+    if(!uDevice.IsNull())
         FlushCommandQueue();
 }
 
@@ -180,18 +171,12 @@ bool DeferApp::Initialize()
     if(!D3DApp::Initialize())
         return false;
 
-	// Ubpa::DX12
-	uGCmdList = { mCommandList };
-	uCmdQueue = { mCommandQueue };
-	uDevice = { md3dDevice };
-	fgRsrcMngr.Init(uGCmdList, uDevice);
-
     // Reset the command list to prep for initialization commands.
-    ThrowIfFailed(mCommandList->Reset(mDirectCmdListAlloc.Get(), nullptr));
+    ThrowIfFailed(uGCmdList->Reset(mDirectCmdListAlloc.Get(), nullptr));
 
     // Get the increment size of a descriptor in this heap type.  This is hardware specific, 
 	// so we have to query this information.
-    mCbvSrvDescriptorSize = md3dDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    mCbvSrvDescriptorSize = uDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
  
 	LoadTextures();
@@ -205,9 +190,9 @@ bool DeferApp::Initialize()
     BuildPSOs();
 
     // Execute the initialization commands.
-    ThrowIfFailed(mCommandList->Close());
-    ID3D12CommandList* cmdsLists[] = { mCommandList.Get() };
-    mCommandQueue->ExecuteCommandLists(_countof(cmdsLists), cmdsLists);
+    ThrowIfFailed(uGCmdList->Close());
+    ID3D12CommandList* cmdsLists[] = { uGCmdList.raw.Get() };
+    uCmdQueue->ExecuteCommandLists(_countof(cmdsLists), cmdsLists);
 
     // Wait until initialization is complete.
     FlushCommandQueue();
@@ -313,28 +298,28 @@ void DeferApp::Draw(const GameTimer& gt)
 	);
 
  //   // Indicate a state transition on the resource usage.
-	//mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
+	//uGCmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
 	//	D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET));
 
  //   // Clear the back buffer and depth buffer.
- //   mCommandList->ClearRenderTargetView(CurrentBackBufferView(), Colors::LightSteelBlue, 0, nullptr);
- //   mCommandList->ClearDepthStencilView(DepthStencilView(), D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
+ //   uGCmdList->ClearRenderTargetView(CurrentBackBufferView(), Colors::LightSteelBlue, 0, nullptr);
+ //   uGCmdList->ClearDepthStencilView(DepthStencilView(), D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
 
  //   // Specify the buffers we are going to render to.
- //   mCommandList->OMSetRenderTargets(1, &CurrentBackBufferView(), true, &DepthStencilView());
+ //   uGCmdList->OMSetRenderTargets(1, &CurrentBackBufferView(), true, &DepthStencilView());
 
 	//ID3D12DescriptorHeap* descriptorHeaps[] = { mSrvDescriptorHeap.Get() };
-	//mCommandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+	//uGCmdList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 
-	//mCommandList->SetGraphicsRootSignature(mRootSignature.Get());
+	//uGCmdList->SetGraphicsRootSignature(mRootSignature.Get());
 
 	//auto passCB = mCurrFrameResource->PassCB->Resource();
-	//mCommandList->SetGraphicsRootConstantBufferView(2, passCB->GetGPUVirtualAddress());
+	//uGCmdList->SetGraphicsRootConstantBufferView(2, passCB->GetGPUVirtualAddress());
 
- //   DrawRenderItems(mCommandList.Get(), mOpaqueRitems);
+ //   DrawRenderItems(uGCmdList.raw.Get(), mOpaqueRitems);
 
  //   // Indicate a state transition on the resource usage.
-	//mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
+	//uGCmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
 	//	D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
 
 	auto [success, crst] = fgCompiler.Compile(fg);
@@ -356,7 +341,7 @@ void DeferApp::Draw(const GameTimer& gt)
     // Add an instruction to the command queue to set a new fence point. 
     // Because we are on the GPU timeline, the new fence point won't be 
     // set until the GPU finishes processing all the commands prior to this Signal().
-    mCommandQueue->Signal(mFence.Get(), mCurrentFence);
+    uCmdQueue->Signal(mFence.Get(), mCurrentFence);
 }
 
 void DeferApp::OnMouseDown(WPARAM btnState, int x, int y)
@@ -519,8 +504,8 @@ void DeferApp::LoadTextures()
 	auto woodCrateTex = std::make_unique<Texture>();
 	woodCrateTex->Name = "woodCrateTex";
 	woodCrateTex->Filename = L"../data/textures/WoodCrate01.dds";
-	ThrowIfFailed(DirectX::CreateDDSTextureFromFile12(md3dDevice.Get(),
-		mCommandList.Get(), woodCrateTex->Filename.c_str(),
+	ThrowIfFailed(DirectX::CreateDDSTextureFromFile12(uDevice.raw.Get(),
+		uGCmdList.raw.Get(), woodCrateTex->Filename.c_str(),
 		woodCrateTex->Resource, woodCrateTex->UploadHeap));
  
 	mTextures[woodCrateTex->Name] = std::move(woodCrateTex);
@@ -559,7 +544,7 @@ void DeferApp::BuildRootSignature()
     }
     ThrowIfFailed(hr);
 
-    ThrowIfFailed(md3dDevice->CreateRootSignature(
+    ThrowIfFailed(uDevice->CreateRootSignature(
 		0,
         serializedRootSig->GetBufferPointer(),
         serializedRootSig->GetBufferSize(),
@@ -575,7 +560,7 @@ void DeferApp::BuildDescriptorHeaps()
 	srvHeapDesc.NumDescriptors = 1;
 	srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
 	srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-	ThrowIfFailed(md3dDevice->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&mSrvDescriptorHeap)));
+	ThrowIfFailed(uDevice->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&mSrvDescriptorHeap)));
 
 	//
 	// Fill out the heap with actual descriptors.
@@ -589,8 +574,8 @@ void DeferApp::BuildDescriptorHeaps()
 
 void DeferApp::BuildShadersAndInputLayout()
 {
-	mShaders["standardVS"] = Ubpa::DX12::CompileShader(L"..\\data\\shaders\\04_defer\\Default.hlsl", nullptr, "VS", "vs_5_0");
-	mShaders["opaquePS"] = Ubpa::DX12::CompileShader(L"..\\data\\shaders\\04_defer\\Default.hlsl", nullptr, "PS", "ps_5_0");
+	mShaders["standardVS"] = Ubpa::DX12::Util::CompileShader(L"..\\data\\shaders\\04_defer\\Default.hlsl", nullptr, "VS", "vs_5_0");
+	mShaders["opaquePS"] = Ubpa::DX12::Util::CompileShader(L"..\\data\\shaders\\04_defer\\Default.hlsl", nullptr, "PS", "ps_5_0");
 	
     mInputLayout =
     {
@@ -634,11 +619,11 @@ void DeferApp::BuildShapeGeometry()
 	ThrowIfFailed(D3DCreateBlob(ibByteSize, &geo->IndexBufferCPU));
 	CopyMemory(geo->IndexBufferCPU->GetBufferPointer(), indices.data(), ibByteSize);
 
-	geo->VertexBufferGPU = Ubpa::DX12::CreateDefaultBuffer(md3dDevice.Get(),
-		mCommandList.Get(), vertices.data(), vbByteSize, geo->VertexBufferUploader);
+	geo->VertexBufferGPU = Ubpa::DX12::Util::CreateDefaultBuffer(uDevice.raw.Get(),
+		uGCmdList.raw.Get(), vertices.data(), vbByteSize, geo->VertexBufferUploader);
 
-	geo->IndexBufferGPU = Ubpa::DX12::CreateDefaultBuffer(md3dDevice.Get(),
-		mCommandList.Get(), indices.data(), ibByteSize, geo->IndexBufferUploader);
+	geo->IndexBufferGPU = Ubpa::DX12::Util::CreateDefaultBuffer(uDevice.raw.Get(),
+		uGCmdList.raw.Get(), indices.data(), ibByteSize, geo->IndexBufferUploader);
 
 	geo->VertexByteStride = sizeof(Vertex);
 	geo->VertexBufferByteSize = vbByteSize;
@@ -680,14 +665,14 @@ void DeferApp::BuildPSOs()
 	opaquePsoDesc.SampleDesc.Count = m4xMsaaState ? 4 : 1;
 	opaquePsoDesc.SampleDesc.Quality = m4xMsaaState ? (m4xMsaaQuality - 1) : 0;
 	opaquePsoDesc.DSVFormat = mDepthStencilFormat;
-    ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&opaquePsoDesc, IID_PPV_ARGS(&mOpaquePSO)));
+    ThrowIfFailed(uDevice->CreateGraphicsPipelineState(&opaquePsoDesc, IID_PPV_ARGS(&mOpaquePSO)));
 }
 
 void DeferApp::BuildFrameResources()
 {
     for(int i = 0; i < gNumFrameResources; ++i)
     {
-        mFrameResources.push_back(std::make_unique<FrameResource>(md3dDevice.Get(),
+        mFrameResources.push_back(std::make_unique<FrameResource>(uDevice.raw.Get(),
             1, (UINT)mAllRitems.size(), (UINT)mMaterials.size()));
     }
 }
@@ -724,8 +709,8 @@ void DeferApp::BuildRenderItems()
 
 void DeferApp::DrawRenderItems(ID3D12GraphicsCommandList* cmdList, const std::vector<RenderItem*>& ritems)
 {
-    UINT objCBByteSize = Ubpa::DX12::CalcConstantBufferByteSize(sizeof(ObjectConstants));
-    UINT matCBByteSize = Ubpa::DX12::CalcConstantBufferByteSize(sizeof(MaterialConstants));
+    UINT objCBByteSize = Ubpa::DX12::Util::CalcConstantBufferByteSize(sizeof(ObjectConstants));
+    UINT matCBByteSize = Ubpa::DX12::Util::CalcConstantBufferByteSize(sizeof(MaterialConstants));
  
 	auto objectCB = mCurrFrameResource->ObjectCB->Resource();
 	auto matCB = mCurrFrameResource->MaterialCB->Resource();

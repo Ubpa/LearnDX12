@@ -7,6 +7,7 @@
 #pragma once
 
 #include <UDX12/UDX12.h>
+#include "../dx12fg/dx12fg.h"
 
 #include <windows.h>
 #include <wrl.h>
@@ -95,7 +96,7 @@ struct MeshGeometry
 	// A MeshGeometry may store multiple geometries in one vertex/index buffer.
 	// Use this container to define the Submesh geometries so we can draw
 	// the Submeshes individually.
-	std::unordered_map<std::string, SubmeshGeometry> DrawArgs;
+	std::unordered_map<std::string, SubmeshGeometry> submeshGeometries;
 
 	D3D12_VERTEX_BUFFER_VIEW VertexBufferView()const
 	{
@@ -192,7 +193,7 @@ struct Texture
 //{                                                                     \
 //    HRESULT hr__ = (x);                                               \
 //    std::wstring wfn = AnsiToWString(__FILE__);                       \
-//    if(FAILED(hr__)) { throw Ubpa::DX12::Exception(hr__, L#x, wfn, __LINE__); } \
+//    if(FAILED(hr__)) { throw Ubpa::DX12::Util::Exception(hr__, L#x, wfn, __LINE__); } \
 //}
 //#endif
 

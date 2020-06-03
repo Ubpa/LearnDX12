@@ -123,15 +123,6 @@ private:
     float mRadius = 15.0f;
 
     POINT mLastMousePos;
-
-    // Ubpa::DX12
-    Ubpa::DX12::GCmdList uGCmdList;
-    Ubpa::DX12::CmdQueue uCmdQueue;
-    Ubpa::DX12::Device uDevice;
-    Ubpa::DX12::FG::RsrcMngr fgRsrcMngr;
-    Ubpa::DX12::FG::Executor fgExecutor;
-    Ubpa::FG::Compiler fgCompiler;
-    Ubpa::FG::FrameGraph fg;
 };
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prevInstance,
@@ -150,7 +141,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prevInstance,
 
         return theApp.Run();
     }
-    catch(Ubpa::DX12::Exception& e)
+    catch(Ubpa::DX12::Util::Exception& e)
     {
         MessageBox(nullptr, e.ToString().c_str(), L"HR Failed", MB_OK);
         return 0;
@@ -164,7 +155,7 @@ ShapesApp::ShapesApp(HINSTANCE hInstance)
 
 ShapesApp::~ShapesApp()
 {
-    if(md3dDevice != nullptr)
+    if(!uDevice.IsNull())
         FlushCommandQueue();
 }
 
@@ -172,12 +163,6 @@ bool ShapesApp::Initialize()
 {
     if(!D3DApp::Initialize())
         return false;
-
-    // Ubpa::DX12
-    uGCmdList = { mCommandList };
-    uCmdQueue = { mCommandQueue };
-    uDevice = { md3dDevice };
-    fgRsrcMngr.Init(uGCmdList, uDevice);
 
     // Reset the command list to prep for initialization commands.
     ThrowIfFailed(uGCmdList->Reset(mDirectCmdListAlloc.Get(), nullptr));
@@ -194,7 +179,7 @@ bool ShapesApp::Initialize()
     // Execute the initialization commands.
     ThrowIfFailed(uGCmdList->Close());
     ID3D12CommandList* cmdsLists[] = { uGCmdList.raw.Get() };
-    mCommandQueue->ExecuteCommandLists(_countof(cmdsLists), cmdsLists);
+    uCmdQueue->ExecuteCommandLists(_countof(cmdsLists), cmdsLists);
 
     // Wait until initialization is complete.
     FlushCommandQueue();
@@ -323,7 +308,7 @@ void ShapesApp::Draw(const GameTimer& gt)
     // Add an instruction to the command queue to set a new fence point. 
     // Because we are on the GPU timeline, the new fence point won't be 
     // set until the GPU finishes processing all the commands prior to this Signal().
-    mCommandQueue->Signal(mFence.Get(), mCurrentFence);
+    uCmdQueue->Signal(mFence.Get(), mCurrentFence);
 }
 
 void ShapesApp::OnMouseDown(WPARAM btnState, int x, int y)
@@ -461,13 +446,13 @@ void ShapesApp::BuildDescriptorHeaps()
     cbvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
     cbvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
     cbvHeapDesc.NodeMask = 0;
-    ThrowIfFailed(md3dDevice->CreateDescriptorHeap(&cbvHeapDesc,
+    ThrowIfFailed(uDevice->CreateDescriptorHeap(&cbvHeapDesc,
         IID_PPV_ARGS(&mCbvHeap)));
 }
 
 void ShapesApp::BuildConstantBufferViews()
 {
-    UINT objCBByteSize = Ubpa::DX12::CalcConstantBufferByteSize(sizeof(ObjectConstants));
+    UINT objCBByteSize = Ubpa::DX12::Util::CalcConstantBufferByteSize(sizeof(ObjectConstants));
 
     UINT objCount = (UINT)mOpaqueRitems.size();
 
@@ -491,11 +476,11 @@ void ShapesApp::BuildConstantBufferViews()
             cbvDesc.BufferLocation = cbAddress;
             cbvDesc.SizeInBytes = objCBByteSize;
 
-            md3dDevice->CreateConstantBufferView(&cbvDesc, handle);
+            uDevice->CreateConstantBufferView(&cbvDesc, handle);
         }
     }
 
-    UINT passCBByteSize = Ubpa::DX12::CalcConstantBufferByteSize(sizeof(PassConstants));
+    UINT passCBByteSize = Ubpa::DX12::Util::CalcConstantBufferByteSize(sizeof(PassConstants));
 
     // Last three descriptors are the pass CBVs for each frame resource.
     for(int frameIndex = 0; frameIndex < gNumFrameResources; ++frameIndex)
@@ -512,7 +497,7 @@ void ShapesApp::BuildConstantBufferViews()
         cbvDesc.BufferLocation = cbAddress;
         cbvDesc.SizeInBytes = passCBByteSize;
         
-        md3dDevice->CreateConstantBufferView(&cbvDesc, handle);
+        uDevice->CreateConstantBufferView(&cbvDesc, handle);
     }
 }
 
@@ -547,7 +532,7 @@ void ShapesApp::BuildRootSignature()
 	}
 	ThrowIfFailed(hr);
 
-	ThrowIfFailed(md3dDevice->CreateRootSignature(
+	ThrowIfFailed(uDevice->CreateRootSignature(
 		0,
 		serializedRootSig->GetBufferPointer(),
 		serializedRootSig->GetBufferSize(),
@@ -556,8 +541,8 @@ void ShapesApp::BuildRootSignature()
 
 void ShapesApp::BuildShadersAndInputLayout()
 {
-	mShaders["standardVS"] = Ubpa::DX12::CompileShader(L"..\\data\\shaders\\02_shape\\color.hlsl", nullptr, "VS", "vs_5_1");
-	mShaders["opaquePS"] = Ubpa::DX12::CompileShader(L"..\\data\\shaders\\02_shape\\color.hlsl", nullptr, "PS", "ps_5_1");
+	mShaders["standardVS"] = Ubpa::DX12::Util::CompileShader(L"..\\data\\shaders\\02_shape\\color.hlsl", nullptr, "VS", "vs_5_1");
+	mShaders["opaquePS"] = Ubpa::DX12::Util::CompileShader(L"..\\data\\shaders\\02_shape\\color.hlsl", nullptr, "PS", "ps_5_1");
 	
     mInputLayout =
     {
@@ -672,10 +657,10 @@ void ShapesApp::BuildShapeGeometry()
 	ThrowIfFailed(D3DCreateBlob(ibByteSize, &geo->IndexBufferCPU));
 	CopyMemory(geo->IndexBufferCPU->GetBufferPointer(), indices.data(), ibByteSize);
 
-	geo->VertexBufferGPU = Ubpa::DX12::CreateDefaultBuffer(md3dDevice.Get(),
+	geo->VertexBufferGPU = Ubpa::DX12::Util::CreateDefaultBuffer(uDevice.raw.Get(),
 		uGCmdList.raw.Get(), vertices.data(), vbByteSize, geo->VertexBufferUploader);
 
-	geo->IndexBufferGPU = Ubpa::DX12::CreateDefaultBuffer(md3dDevice.Get(),
+	geo->IndexBufferGPU = Ubpa::DX12::Util::CreateDefaultBuffer(uDevice.raw.Get(),
 		uGCmdList.raw.Get(), indices.data(), ibByteSize, geo->IndexBufferUploader);
 
 	geo->VertexByteStride = sizeof(Vertex);
@@ -723,7 +708,7 @@ void ShapesApp::BuildPSOs()
 	opaquePsoDesc.SampleDesc.Count = m4xMsaaState ? 4 : 1;
 	opaquePsoDesc.SampleDesc.Quality = m4xMsaaState ? (m4xMsaaQuality - 1) : 0;
 	opaquePsoDesc.DSVFormat = mDepthStencilFormat;
-    ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&opaquePsoDesc, IID_PPV_ARGS(&mPSOs["opaque"])));
+    ThrowIfFailed(uDevice->CreateGraphicsPipelineState(&opaquePsoDesc, IID_PPV_ARGS(&mPSOs["opaque"])));
 
 
     //
@@ -732,14 +717,14 @@ void ShapesApp::BuildPSOs()
 
     D3D12_GRAPHICS_PIPELINE_STATE_DESC opaqueWireframePsoDesc = opaquePsoDesc;
     opaqueWireframePsoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_WIREFRAME;
-    ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&opaqueWireframePsoDesc, IID_PPV_ARGS(&mPSOs["opaque_wireframe"])));
+    ThrowIfFailed(uDevice->CreateGraphicsPipelineState(&opaqueWireframePsoDesc, IID_PPV_ARGS(&mPSOs["opaque_wireframe"])));
 }
 
 void ShapesApp::BuildFrameResources()
 {
     for(int i = 0; i < gNumFrameResources; ++i)
     {
-        mFrameResources.push_back(std::make_unique<FrameResource>(md3dDevice.Get(),
+        mFrameResources.push_back(std::make_unique<FrameResource>(uDevice.raw.Get(),
             1, (UINT)mAllRitems.size()));
     }
 }
@@ -825,7 +810,7 @@ void ShapesApp::BuildRenderItems()
 
 void ShapesApp::DrawRenderItems(ID3D12GraphicsCommandList* cmdList, const std::vector<RenderItem*>& ritems)
 {
-    UINT objCBByteSize = Ubpa::DX12::CalcConstantBufferByteSize(sizeof(ObjectConstants));
+    UINT objCBByteSize = Ubpa::DX12::Util::CalcConstantBufferByteSize(sizeof(ObjectConstants));
  
 	auto objectCB = mCurrFrameResource->ObjectCB->Resource();
 

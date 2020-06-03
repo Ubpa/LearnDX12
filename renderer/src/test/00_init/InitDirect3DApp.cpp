@@ -43,7 +43,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prevInstance,
 
         return theApp.Run();
     }
-    catch(Ubpa::DX12::Exception& e)
+    catch(Ubpa::DX12::Util::Exception& e)
     {
         MessageBox(nullptr, e.ToString().c_str(), L"HR Failed", MB_OK);
         return 0;
@@ -83,9 +83,6 @@ void InitDirect3DApp::Draw(const GameTimer& gt)
     // We can only reset when the associated command lists have finished execution on the GPU.
 	ThrowIfFailed(mDirectCmdListAlloc->Reset());
 
-	// Ubpa::DX12::GCmdList
-	Ubpa::DX12::GCmdList uGCmdList{ mCommandList };
-
 	// A command list can be reset after it has been added to the command queue via ExecuteCommandList.
     // Reusing the command list reuses memory.
     //ThrowIfFailed(uGCmdList->Reset(mDirectCmdListAlloc.Get(), nullptr));
@@ -123,8 +120,7 @@ void InitDirect3DApp::Draw(const GameTimer& gt)
 	uGCmdList->Close();
 
     // Add the command list to the queue for execution.
-	ID3D12CommandList* cmdsLists[] = { uGCmdList.raw.Get() };
-	mCommandQueue->ExecuteCommandLists(_countof(cmdsLists), cmdsLists);
+	uCmdQueue.Execute(uGCmdList.raw.Get());
 	
 	// swap the back and front buffers
 	ThrowIfFailed(mSwapChain->Present(0, 0));

@@ -94,14 +94,14 @@ protected:
 	
     Microsoft::WRL::ComPtr<IDXGIFactory4> mdxgiFactory;
     Microsoft::WRL::ComPtr<IDXGISwapChain> mSwapChain;
-    Microsoft::WRL::ComPtr<ID3D12Device> md3dDevice;
+    //Microsoft::WRL::ComPtr<ID3D12Device> md3dDevice;
 
     Microsoft::WRL::ComPtr<ID3D12Fence> mFence;
     UINT64 mCurrentFence = 0;
 	
-    Microsoft::WRL::ComPtr<ID3D12CommandQueue> mCommandQueue;
+    //Microsoft::WRL::ComPtr<ID3D12CommandQueue> mCommandQueue;
     Microsoft::WRL::ComPtr<ID3D12CommandAllocator> mDirectCmdListAlloc;
-    Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> mCommandList;
+    //Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> mCommandList;
 
 	static const int SwapChainBufferCount = 2;
 	int mCurrBackBuffer = 0;
@@ -125,5 +125,14 @@ protected:
     DXGI_FORMAT mDepthStencilFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
 	int mClientWidth = 800;
 	int mClientHeight = 600;
+
+    // Ubpa::DX12
+    Ubpa::DX12::Device uDevice;
+    Ubpa::DX12::CmdQueue uCmdQueue;
+    Ubpa::DX12::GCmdList uGCmdList;
+    Ubpa::DX12::FG::RsrcMngr fgRsrcMngr;
+    Ubpa::DX12::FG::Executor fgExecutor;
+    Ubpa::FG::Compiler fgCompiler;
+    Ubpa::FG::FrameGraph fg;
 };
 

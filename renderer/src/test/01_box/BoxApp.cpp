@@ -84,15 +84,6 @@ private:
     float mRadius = 5.0f;
 
     POINT mLastMousePos;
-
-    // Ubpa::DX12
-    Ubpa::DX12::GCmdList uGCmdList;
-    Ubpa::DX12::CmdQueue uCmdQueue;
-    Ubpa::DX12::Device uDevice;
-    Ubpa::DX12::FG::RsrcMngr fgRsrcMngr;
-    Ubpa::DX12::FG::Executor fgExecutor;
-    Ubpa::FG::Compiler fgCompiler;
-    Ubpa::FG::FrameGraph fg;
 };
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prevInstance,
@@ -111,7 +102,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prevInstance,
 
         return theApp.Run();
     }
-    catch(Ubpa::DX12::Exception& e)
+    catch(Ubpa::DX12::Util::Exception& e)
     {
         MessageBox(nullptr, e.ToString().c_str(), L"HR Failed", MB_OK);
         return 0;
@@ -132,12 +123,6 @@ bool BoxApp::Initialize()
     if(!D3DApp::Initialize())
 		return false;
 
-    // Ubpa::DX12
-    uGCmdList = { mCommandList };
-    uCmdQueue = { mCommandQueue };
-    uDevice = { md3dDevice };
-    fgRsrcMngr.Init(uGCmdList, uDevice);
-
     // Reset the command list to prep for initialization commands.
     ThrowIfFailed(uGCmdList->Reset(mDirectCmdListAlloc.Get(), nullptr));
  
@@ -150,8 +135,7 @@ bool BoxApp::Initialize()
 
     // Execute the initialization commands.
     ThrowIfFailed(uGCmdList->Close());
-	ID3D12CommandList* cmdsLists[] = { uGCmdList.raw.Get() };
-	mCommandQueue->ExecuteCommandLists(_countof(cmdsLists), cmdsLists);
+    uCmdQueue.Execute(uGCmdList.raw.Get());
 
     // Wait until initialization is complete.
     FlushCommandQueue();
@@ -265,7 +249,7 @@ void BoxApp::Draw(const GameTimer& gt)
  
     // Add the command list to the queue for execution.
 	//ID3D12CommandList* cmdsLists[] = { uGCmdList.raw.Get() };
-	//mCommandQueue->ExecuteCommandLists(_countof(cmdsLists), cmdsLists);
+	//uCmdQueue->ExecuteCommandLists(_countof(cmdsLists), cmdsLists);
     uCmdQueue.Execute(uGCmdList.raw.Get());
 	
 	// swap the back and front buffers
@@ -335,9 +319,9 @@ void BoxApp::BuildConstantBuffers()
     // 1. 创建上传缓冲区
     // 2. 在描述符堆中创建该缓冲区的常量缓冲区视图
 
-	mObjectCB = std::make_unique<UploadBuffer<ObjectConstants>>(md3dDevice.Get(), 1, true);
+	mObjectCB = std::make_unique<UploadBuffer<ObjectConstants>>(uDevice.raw.Get(), 1, true);
 
-	UINT objCBByteSize = Ubpa::DX12::CalcConstantBufferByteSize(sizeof(ObjectConstants));
+	UINT objCBByteSize = Ubpa::DX12::Util::CalcConstantBufferByteSize(sizeof(ObjectConstants));
 
 	D3D12_GPU_VIRTUAL_ADDRESS cbAddress = mObjectCB->Resource()->GetGPUVirtualAddress();
     // Offset to the ith object constant buffer in the buffer.
@@ -348,9 +332,9 @@ void BoxApp::BuildConstantBuffers()
     // > format 由 shader 解释
 	D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc;
 	cbvDesc.BufferLocation = cbAddress;
-	cbvDesc.SizeInBytes = Ubpa::DX12::CalcConstantBufferByteSize(sizeof(ObjectConstants));
+	cbvDesc.SizeInBytes = Ubpa::DX12::Util::CalcConstantBufferByteSize(sizeof(ObjectConstants));
 
-	md3dDevice->CreateConstantBufferView(
+	uDevice->CreateConstantBufferView(
 		&cbvDesc,
 		mCbvHeap->GetCPUDescriptorHandleForHeapStart());
 }
@@ -394,7 +378,7 @@ void BoxApp::BuildRootSignature()
 	}
 	ThrowIfFailed(hr);
 
-	ThrowIfFailed(md3dDevice->CreateRootSignature(
+	ThrowIfFailed(uDevice->CreateRootSignature(
 		0,
 		serializedRootSig->GetBufferPointer(),
 		serializedRootSig->GetBufferSize(),
@@ -403,8 +387,8 @@ void BoxApp::BuildRootSignature()
 
 void BoxApp::BuildShadersAndInputLayout()
 {
-	mvsByteCode = Ubpa::DX12::CompileShader(L"..\\data\\shaders\\01_box\\color.hlsl", nullptr, "VS", "vs_5_0");
-	mpsByteCode = Ubpa::DX12::CompileShader(L"..\\data\\shaders\\01_box\\color.hlsl", nullptr, "PS", "ps_5_0");
+	mvsByteCode = Ubpa::DX12::Util::CompileShader(L"..\\data\\shaders\\01_box\\color.hlsl", nullptr, "VS", "vs_5_0");
+	mpsByteCode = Ubpa::DX12::Util::CompileShader(L"..\\data\\shaders\\01_box\\color.hlsl", nullptr, "PS", "ps_5_0");
 
     mInputLayout =
     {
@@ -471,10 +455,10 @@ void BoxApp::BuildBoxGeometry()
     Ubpa::DX12::Blob indexbuffer{ mBoxGeo->IndexBufferCPU };
     vertexbuffer.Create(indices.data(), ibByteSize);
 
-	mBoxGeo->VertexBufferGPU = Ubpa::DX12::CreateDefaultBuffer(md3dDevice.Get(),
+	mBoxGeo->VertexBufferGPU = Ubpa::DX12::Util::CreateDefaultBuffer(uDevice.raw.Get(),
         uGCmdList.raw.Get(), vertices.data(), vbByteSize, mBoxGeo->VertexBufferUploader);
 
-	mBoxGeo->IndexBufferGPU = Ubpa::DX12::CreateDefaultBuffer(md3dDevice.Get(),
+	mBoxGeo->IndexBufferGPU = Ubpa::DX12::Util::CreateDefaultBuffer(uDevice.raw.Get(),
         uGCmdList.raw.Get(), indices.data(), ibByteSize, mBoxGeo->IndexBufferUploader);
 
 	mBoxGeo->VertexByteStride = sizeof(Vertex);
@@ -516,5 +500,5 @@ void BoxApp::BuildPSO()
     psoDesc.SampleDesc.Count = m4xMsaaState ? 4 : 1;
     psoDesc.SampleDesc.Quality = m4xMsaaState ? (m4xMsaaQuality - 1) : 0;
     psoDesc.DSVFormat = mDepthStencilFormat;
-    ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&mPSO)));
+    ThrowIfFailed(uDevice->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&mPSO)));
 }
