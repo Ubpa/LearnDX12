@@ -14,9 +14,6 @@
 
 #include <UDX12/UDX12.h>
 
-#include <UDX12/_deps/DirectXTK12/ResourceUploadBatch.h>
-#include <UDX12/_deps/DirectXTK12/BufferHelpers.h>
-
 #include "../../dx12fg/dx12fg.h"
 
 #include <UFG/FrameGraph.h>
@@ -69,7 +66,7 @@ private:
 
     std::unique_ptr<UploadBuffer<ObjectConstants>> mObjectCB = nullptr;
 
-	std::unique_ptr<MeshGeometry> mBoxGeo = nullptr;
+	std::unique_ptr<Ubpa::DX12::MeshGeometry> mBoxGeo = nullptr;
 
     ComPtr<ID3DBlob> mvsByteCode = nullptr;
     ComPtr<ID3DBlob> mpsByteCode = nullptr;
@@ -461,37 +458,37 @@ void BoxApp::BuildBoxGeometry(DirectX::ResourceUploadBatch& upload)
     const UINT vbByteSize = (UINT)vertices.size() * sizeof(Vertex);
 	const UINT ibByteSize = (UINT)indices.size() * sizeof(std::uint16_t);
 
-	mBoxGeo = std::make_unique<MeshGeometry>();
+	mBoxGeo = std::make_unique<Ubpa::DX12::MeshGeometry>();
 	mBoxGeo->Name = "boxGeo";
 
 	//ThrowIfFailed(D3DCreateBlob(vbByteSize, &mBoxGeo->VertexBufferCPU));
 	//CopyMemory(mBoxGeo->VertexBufferCPU->GetBufferPointer(), vertices.data(), vbByteSize);
-    Ubpa::DX12::Blob vertexbuffer{ mBoxGeo->VertexBufferCPU };
-    vertexbuffer.Create(vertices.data(), vbByteSize);
+ //   Ubpa::DX12::Blob vertexbuffer{ mBoxGeo->VertexBufferCPU };
+ //   vertexbuffer.Create(vertices.data(), vbByteSize);
 
-	//ThrowIfFailed(D3DCreateBlob(ibByteSize, &mBoxGeo->IndexBufferCPU));
-	//CopyMemory(mBoxGeo->IndexBufferCPU->GetBufferPointer(), indices.data(), ibByteSize);
-    Ubpa::DX12::Blob indexbuffer{ mBoxGeo->IndexBufferCPU };
-    vertexbuffer.Create(indices.data(), ibByteSize);
+	////ThrowIfFailed(D3DCreateBlob(ibByteSize, &mBoxGeo->IndexBufferCPU));
+	////CopyMemory(mBoxGeo->IndexBufferCPU->GetBufferPointer(), indices.data(), ibByteSize);
+ //   Ubpa::DX12::Blob indexbuffer{ mBoxGeo->IndexBufferCPU };
+ //   vertexbuffer.Create(indices.data(), ibByteSize);
 
-    /*mBoxGeo->VertexBufferGPU = Ubpa::DX12::Util::CreateDefaultBuffer(uDevice.raw.Get(),
-        uGCmdList.raw.Get(), vertices.data(), vbByteSize, mBoxGeo->VertexBufferUploader);
+ //   /*mBoxGeo->VertexBufferGPU = Ubpa::DX12::Util::CreateDefaultBuffer(uDevice.raw.Get(),
+ //       uGCmdList.raw.Get(), vertices.data(), vbByteSize, mBoxGeo->VertexBufferUploader);
 
-    mBoxGeo->IndexBufferGPU = Ubpa::DX12::Util::CreateDefaultBuffer(uDevice.raw.Get(),
-        uGCmdList.raw.Get(), indices.data(), ibByteSize, mBoxGeo->IndexBufferUploader);*/
+ //   mBoxGeo->IndexBufferGPU = Ubpa::DX12::Util::CreateDefaultBuffer(uDevice.raw.Get(),
+ //       uGCmdList.raw.Get(), indices.data(), ibByteSize, mBoxGeo->IndexBufferUploader);*/
 
-    DirectX::CreateStaticBuffer(uDevice.raw.Get(), upload, vertices, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER,
-        mBoxGeo->VertexBufferGPU.GetAddressOf());
+ //   DirectX::CreateStaticBuffer(uDevice.raw.Get(), upload, vertices, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER,
+ //       mBoxGeo->VertexBufferGPU.GetAddressOf());
 
-    DirectX::CreateStaticBuffer(uDevice.raw.Get(), upload, indices, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER,
-        mBoxGeo->IndexBufferGPU.GetAddressOf());
+ //   DirectX::CreateStaticBuffer(uDevice.raw.Get(), upload, indices, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER,
+ //       mBoxGeo->IndexBufferGPU.GetAddressOf());
 
-	mBoxGeo->VertexByteStride = sizeof(Vertex);
-	mBoxGeo->VertexBufferByteSize = vbByteSize;
-	mBoxGeo->IndexFormat = DXGI_FORMAT_R16_UINT;
-	mBoxGeo->IndexBufferByteSize = ibByteSize;
+    mBoxGeo->InitBuffer(uDevice.raw.Get(), upload,
+        vertices.data(), (UINT)vertices.size(), sizeof(Vertex), true,
+        indices.data(), (UINT)indices.size(), DXGI_FORMAT_R16_UINT, true
+    );
 
-	SubmeshGeometry submesh;
+	Ubpa::DX12::SubmeshGeometry submesh;
 	submesh.IndexCount = (UINT)indices.size();
 	submesh.StartIndexLocation = 0;
 	submesh.BaseVertexLocation = 0;

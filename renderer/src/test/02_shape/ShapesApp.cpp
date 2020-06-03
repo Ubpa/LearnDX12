@@ -40,7 +40,7 @@ struct RenderItem
 	// Index into GPU constant buffer corresponding to the ObjectCB for this render item.
 	UINT ObjCBIndex = -1;
 
-	MeshGeometry* Geo = nullptr;
+	Ubpa::DX12::MeshGeometry* Geo = nullptr;
 
     // Primitive topology.
     D3D12_PRIMITIVE_TOPOLOGY PrimitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
@@ -79,7 +79,7 @@ private:
     void BuildConstantBufferViews();
     void BuildRootSignature();
     void BuildShadersAndInputLayout();
-    void BuildShapeGeometry();
+    void BuildShapeGeometry(DirectX::ResourceUploadBatch&);
     void BuildPSOs();
     void BuildFrameResources();
     void BuildRenderItems();
@@ -96,7 +96,7 @@ private:
 
 	ComPtr<ID3D12DescriptorHeap> mSrvDescriptorHeap = nullptr;
 
-	std::unordered_map<std::string, std::unique_ptr<MeshGeometry>> mGeometries;
+	std::unordered_map<std::string, std::unique_ptr<Ubpa::DX12::MeshGeometry>> mGeometries;
 	std::unordered_map<std::string, ComPtr<ID3DBlob>> mShaders;
     std::unordered_map<std::string, ComPtr<ID3D12PipelineState>> mPSOs;
 
@@ -175,9 +175,12 @@ bool ShapesApp::Initialize()
     // Reset the command list to prep for initialization commands.
     ThrowIfFailed(uGCmdList->Reset(mDirectCmdListAlloc.Get(), nullptr));
 
+    DirectX::ResourceUploadBatch upload(uDevice.raw.Get());
+    upload.Begin();
+
     BuildRootSignature(); // 无新内容
     BuildShadersAndInputLayout(); // 无新内容
-    BuildShapeGeometry(); // 将多个 shape 合并
+    BuildShapeGeometry(upload); // 将多个 shape 合并
     BuildRenderItems(); // 将绘制一个几何体所需的参数都记录好
     BuildFrameResources(); // 3 帧
     BuildDescriptorHeaps(); // 帧数 * (对象个数 + pass)
@@ -187,6 +190,8 @@ bool ShapesApp::Initialize()
     // Execute the initialization commands.
     ThrowIfFailed(uGCmdList->Close());
     uCmdQueue.Execute(uGCmdList.raw.Get());
+
+    upload.End(uCmdQueue.raw.Get()).wait();
 
     // Wait until initialization is complete.
     FlushCommandQueue();
@@ -558,7 +563,7 @@ void ShapesApp::BuildShadersAndInputLayout()
     };
 }
 
-void ShapesApp::BuildShapeGeometry()
+void ShapesApp::BuildShapeGeometry(DirectX::ResourceUploadBatch& upload)
 {
     // 将多个 shape 合并
 
@@ -588,22 +593,22 @@ void ShapesApp::BuildShapeGeometry()
     // Define the SubmeshGeometry that cover different 
     // regions of the vertex/index buffers.
 
-	SubmeshGeometry boxSubmesh;
+    Ubpa::DX12::SubmeshGeometry boxSubmesh;
 	boxSubmesh.IndexCount = (UINT)box.Indices32.size();
 	boxSubmesh.StartIndexLocation = boxIndexOffset;
 	boxSubmesh.BaseVertexLocation = boxVertexOffset;
 
-	SubmeshGeometry gridSubmesh;
+    Ubpa::DX12::SubmeshGeometry gridSubmesh;
 	gridSubmesh.IndexCount = (UINT)grid.Indices32.size();
 	gridSubmesh.StartIndexLocation = gridIndexOffset;
 	gridSubmesh.BaseVertexLocation = gridVertexOffset;
 
-	SubmeshGeometry sphereSubmesh;
+    Ubpa::DX12::SubmeshGeometry sphereSubmesh;
 	sphereSubmesh.IndexCount = (UINT)sphere.Indices32.size();
 	sphereSubmesh.StartIndexLocation = sphereIndexOffset;
 	sphereSubmesh.BaseVertexLocation = sphereVertexOffset;
 
-	SubmeshGeometry cylinderSubmesh;
+    Ubpa::DX12::SubmeshGeometry cylinderSubmesh;
 	cylinderSubmesh.IndexCount = (UINT)cylinder.Indices32.size();
 	cylinderSubmesh.StartIndexLocation = cylinderIndexOffset;
 	cylinderSubmesh.BaseVertexLocation = cylinderVertexOffset;
@@ -655,10 +660,10 @@ void ShapesApp::BuildShapeGeometry()
     const UINT vbByteSize = (UINT)vertices.size() * sizeof(Vertex);
     const UINT ibByteSize = (UINT)indices.size()  * sizeof(std::uint16_t);
 
-	auto geo = std::make_unique<MeshGeometry>();
+	auto geo = std::make_unique<Ubpa::DX12::MeshGeometry>();
 	geo->Name = "shapeGeo";
 
-	ThrowIfFailed(D3DCreateBlob(vbByteSize, &geo->VertexBufferCPU));
+	/*ThrowIfFailed(D3DCreateBlob(vbByteSize, &geo->VertexBufferCPU));
 	CopyMemory(geo->VertexBufferCPU->GetBufferPointer(), vertices.data(), vbByteSize);
 
 	ThrowIfFailed(D3DCreateBlob(ibByteSize, &geo->IndexBufferCPU));
@@ -673,7 +678,11 @@ void ShapesApp::BuildShapeGeometry()
 	geo->VertexByteStride = sizeof(Vertex);
 	geo->VertexBufferByteSize = vbByteSize;
 	geo->IndexFormat = DXGI_FORMAT_R16_UINT;
-	geo->IndexBufferByteSize = ibByteSize;
+	geo->IndexBufferByteSize = ibByteSize;*/
+
+    geo->InitBuffer(uDevice.raw.Get(), upload,
+        vertices.data(), (UINT)vertices.size(), sizeof(Vertex), true,
+        indices.data(), (UINT)indices.size(), DXGI_FORMAT_R16_UINT, true);
 
 	geo->submeshGeometries["box"] = boxSubmesh;
 	geo->submeshGeometries["grid"] = gridSubmesh;

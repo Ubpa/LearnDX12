@@ -42,7 +42,7 @@ struct RenderItem
 	UINT ObjCBIndex = -1;
 
 	Material* Mat = nullptr;
-	MeshGeometry* Geo = nullptr;
+	Ubpa::DX12::MeshGeometry* Geo = nullptr;
 
     // Primitive topology.
     D3D12_PRIMITIVE_TOPOLOGY PrimitiveType = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
@@ -83,7 +83,7 @@ private:
     void BuildRootSignature();
 	void BuildDescriptorHeaps();
     void BuildShadersAndInputLayout();
-    void BuildShapeGeometry();
+    void BuildShapeGeometry(DirectX::ResourceUploadBatch&);
     void BuildPSOs();
     void BuildFrameResources();
     void BuildMaterials();
@@ -104,7 +104,7 @@ private:
 
 	ComPtr<ID3D12DescriptorHeap> mSrvDescriptorHeap = nullptr;
 
-	std::unordered_map<std::string, std::unique_ptr<MeshGeometry>> mGeometries;
+	std::unordered_map<std::string, std::unique_ptr<Ubpa::DX12::MeshGeometry>> mGeometries;
 	std::unordered_map<std::string, std::unique_ptr<Material>> mMaterials;
 	std::unordered_map<std::string, std::unique_ptr<Texture>> mTextures;
 	std::unordered_map<std::string, ComPtr<ID3DBlob>> mShaders;
@@ -186,12 +186,14 @@ bool CrateApp::Initialize()
 	// so we have to query this information.
     mCbvSrvDescriptorSize = uDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
+	DirectX::ResourceUploadBatch upload(uDevice.raw.Get());
+	upload.Begin();
  
 	LoadTextures();
     BuildRootSignature();
 	BuildDescriptorHeaps();
     BuildShadersAndInputLayout();
-    BuildShapeGeometry();
+    BuildShapeGeometry(upload);
 	BuildMaterials();
     BuildRenderItems();
     BuildFrameResources();
@@ -200,6 +202,8 @@ bool CrateApp::Initialize()
     // Execute the initialization commands.
     ThrowIfFailed(uGCmdList->Close());
 	uCmdQueue.Execute(uGCmdList.raw.Get());
+
+	upload.End(uCmdQueue.raw.Get());
 
     // Wait until initialization is complete.
     FlushCommandQueue();
@@ -592,12 +596,12 @@ void CrateApp::BuildShadersAndInputLayout()
     };
 }
 
-void CrateApp::BuildShapeGeometry()
+void CrateApp::BuildShapeGeometry(DirectX::ResourceUploadBatch& upload)
 {
     GeometryGenerator geoGen;
 	GeometryGenerator::MeshData box = geoGen.CreateBox(1.0f, 1.0f, 1.0f, 3);
  
-	SubmeshGeometry boxSubmesh;
+	Ubpa::DX12::SubmeshGeometry boxSubmesh;
 	boxSubmesh.IndexCount = (UINT)box.Indices32.size();
 	boxSubmesh.StartIndexLocation = 0;
 	boxSubmesh.BaseVertexLocation = 0;
@@ -617,10 +621,10 @@ void CrateApp::BuildShapeGeometry()
     const UINT vbByteSize = (UINT)vertices.size() * sizeof(Vertex);
     const UINT ibByteSize = (UINT)indices.size()  * sizeof(std::uint16_t);
 
-	auto geo = std::make_unique<MeshGeometry>();
+	auto geo = std::make_unique<Ubpa::DX12::MeshGeometry>();
 	geo->Name = "boxGeo";
 
-	ThrowIfFailed(D3DCreateBlob(vbByteSize, &geo->VertexBufferCPU));
+	/*ThrowIfFailed(D3DCreateBlob(vbByteSize, &geo->VertexBufferCPU));
 	CopyMemory(geo->VertexBufferCPU->GetBufferPointer(), vertices.data(), vbByteSize);
 
 	ThrowIfFailed(D3DCreateBlob(ibByteSize, &geo->IndexBufferCPU));
@@ -635,7 +639,11 @@ void CrateApp::BuildShapeGeometry()
 	geo->VertexByteStride = sizeof(Vertex);
 	geo->VertexBufferByteSize = vbByteSize;
 	geo->IndexFormat = DXGI_FORMAT_R16_UINT;
-	geo->IndexBufferByteSize = ibByteSize;
+	geo->IndexBufferByteSize = ibByteSize;*/
+
+	geo->InitBuffer(uDevice.raw.Get(), upload,
+		vertices.data(), (UINT)vertices.size(), sizeof(Vertex), true,
+		indices.data(), (UINT)indices.size(), DXGI_FORMAT_R16_UINT, true);
 
 	geo->submeshGeometries["box"] = boxSubmesh;
 
