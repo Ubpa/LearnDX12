@@ -123,6 +123,12 @@ private:
     float mRadius = 15.0f;
 
     POINT mLastMousePos;
+
+    // frame graph
+    Ubpa::DX12::FG::RsrcMngr fgRsrcMngr;
+    Ubpa::DX12::FG::Executor fgExecutor;
+    Ubpa::FG::Compiler fgCompiler;
+    Ubpa::FG::FrameGraph fg;
 };
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prevInstance,
@@ -164,6 +170,8 @@ bool ShapesApp::Initialize()
     if(!D3DApp::Initialize())
         return false;
 
+    fgRsrcMngr.Init(uGCmdList, uDevice);
+
     // Reset the command list to prep for initialization commands.
     ThrowIfFailed(uGCmdList->Reset(mDirectCmdListAlloc.Get(), nullptr));
 
@@ -178,8 +186,7 @@ bool ShapesApp::Initialize()
 
     // Execute the initialization commands.
     ThrowIfFailed(uGCmdList->Close());
-    ID3D12CommandList* cmdsLists[] = { uGCmdList.raw.Get() };
-    uCmdQueue->ExecuteCommandLists(_countof(cmdsLists), cmdsLists);
+    uCmdQueue.Execute(uGCmdList.raw.Get());
 
     // Wait until initialization is complete.
     FlushCommandQueue();
@@ -242,8 +249,8 @@ void ShapesApp::Draw(const GameTimer& gt)
     uGCmdList->RSSetScissorRects(1, &mScissorRect);
 
     fg.Clear();
-    fgRsrcMngr.Clear();
-    fgExecutor.Clear();
+    fgRsrcMngr.NewFrame();
+    fgExecutor.NewFrame();;
 
     auto backbuffer = fg.AddResourceNode("Back Buffer");
     auto depthstencil = fg.AddResourceNode("Depth Stencil");
@@ -261,7 +268,7 @@ void ShapesApp::Draw(const GameTimer& gt)
 
     fgRsrcMngr
         .RegisterImportedRsrc(backbuffer, { CurrentBackBuffer(), D3D12_RESOURCE_STATE_PRESENT })
-        .RegisterImportedRsrc(depthstencil, { mDepthStencilBuffer.Get(), D3D12_RESOURCE_STATE_PRESENT })
+        .RegisterImportedRsrc(depthstencil, { mDepthStencilBuffer.Get(), D3D12_RESOURCE_STATE_DEPTH_WRITE })
         .RegisterPassRsrcs(pass, backbuffer, D3D12_RESOURCE_STATE_RENDER_TARGET,
             Ubpa::DX12::FG::RsrcImplDesc_RTV_Null{})
         .RegisterPassRsrcs(pass, depthstencil, D3D12_RESOURCE_STATE_DEPTH_WRITE, dsvDesc);
@@ -668,10 +675,10 @@ void ShapesApp::BuildShapeGeometry()
 	geo->IndexFormat = DXGI_FORMAT_R16_UINT;
 	geo->IndexBufferByteSize = ibByteSize;
 
-	geo->DrawArgs["box"] = boxSubmesh;
-	geo->DrawArgs["grid"] = gridSubmesh;
-	geo->DrawArgs["sphere"] = sphereSubmesh;
-	geo->DrawArgs["cylinder"] = cylinderSubmesh;
+	geo->submeshGeometries["box"] = boxSubmesh;
+	geo->submeshGeometries["grid"] = gridSubmesh;
+	geo->submeshGeometries["sphere"] = sphereSubmesh;
+	geo->submeshGeometries["cylinder"] = cylinderSubmesh;
 
 	mGeometries[geo->Name] = std::move(geo);
 }
@@ -736,9 +743,9 @@ void ShapesApp::BuildRenderItems()
 	boxRitem->ObjCBIndex = 0;
 	boxRitem->Geo = mGeometries["shapeGeo"].get();
 	boxRitem->PrimitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
-	boxRitem->IndexCount = boxRitem->Geo->DrawArgs["box"].IndexCount;
-	boxRitem->StartIndexLocation = boxRitem->Geo->DrawArgs["box"].StartIndexLocation;
-	boxRitem->BaseVertexLocation = boxRitem->Geo->DrawArgs["box"].BaseVertexLocation;
+	boxRitem->IndexCount = boxRitem->Geo->submeshGeometries["box"].IndexCount;
+	boxRitem->StartIndexLocation = boxRitem->Geo->submeshGeometries["box"].StartIndexLocation;
+	boxRitem->BaseVertexLocation = boxRitem->Geo->submeshGeometries["box"].BaseVertexLocation;
 	mAllRitems.push_back(std::move(boxRitem));
 
     auto gridRitem = std::make_unique<RenderItem>();
@@ -746,9 +753,9 @@ void ShapesApp::BuildRenderItems()
 	gridRitem->ObjCBIndex = 1;
 	gridRitem->Geo = mGeometries["shapeGeo"].get();
 	gridRitem->PrimitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
-    gridRitem->IndexCount = gridRitem->Geo->DrawArgs["grid"].IndexCount;
-    gridRitem->StartIndexLocation = gridRitem->Geo->DrawArgs["grid"].StartIndexLocation;
-    gridRitem->BaseVertexLocation = gridRitem->Geo->DrawArgs["grid"].BaseVertexLocation;
+    gridRitem->IndexCount = gridRitem->Geo->submeshGeometries["grid"].IndexCount;
+    gridRitem->StartIndexLocation = gridRitem->Geo->submeshGeometries["grid"].StartIndexLocation;
+    gridRitem->BaseVertexLocation = gridRitem->Geo->submeshGeometries["grid"].BaseVertexLocation;
 	mAllRitems.push_back(std::move(gridRitem));
 
 	UINT objCBIndex = 2;
@@ -769,33 +776,33 @@ void ShapesApp::BuildRenderItems()
 		leftCylRitem->ObjCBIndex = objCBIndex++;
 		leftCylRitem->Geo = mGeometries["shapeGeo"].get();
 		leftCylRitem->PrimitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
-		leftCylRitem->IndexCount = leftCylRitem->Geo->DrawArgs["cylinder"].IndexCount;
-		leftCylRitem->StartIndexLocation = leftCylRitem->Geo->DrawArgs["cylinder"].StartIndexLocation;
-		leftCylRitem->BaseVertexLocation = leftCylRitem->Geo->DrawArgs["cylinder"].BaseVertexLocation;
+		leftCylRitem->IndexCount = leftCylRitem->Geo->submeshGeometries["cylinder"].IndexCount;
+		leftCylRitem->StartIndexLocation = leftCylRitem->Geo->submeshGeometries["cylinder"].StartIndexLocation;
+		leftCylRitem->BaseVertexLocation = leftCylRitem->Geo->submeshGeometries["cylinder"].BaseVertexLocation;
 
 		XMStoreFloat4x4(&rightCylRitem->World, leftCylWorld);
 		rightCylRitem->ObjCBIndex = objCBIndex++;
 		rightCylRitem->Geo = mGeometries["shapeGeo"].get();
 		rightCylRitem->PrimitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
-		rightCylRitem->IndexCount = rightCylRitem->Geo->DrawArgs["cylinder"].IndexCount;
-		rightCylRitem->StartIndexLocation = rightCylRitem->Geo->DrawArgs["cylinder"].StartIndexLocation;
-		rightCylRitem->BaseVertexLocation = rightCylRitem->Geo->DrawArgs["cylinder"].BaseVertexLocation;
+		rightCylRitem->IndexCount = rightCylRitem->Geo->submeshGeometries["cylinder"].IndexCount;
+		rightCylRitem->StartIndexLocation = rightCylRitem->Geo->submeshGeometries["cylinder"].StartIndexLocation;
+		rightCylRitem->BaseVertexLocation = rightCylRitem->Geo->submeshGeometries["cylinder"].BaseVertexLocation;
 
 		XMStoreFloat4x4(&leftSphereRitem->World, leftSphereWorld);
 		leftSphereRitem->ObjCBIndex = objCBIndex++;
 		leftSphereRitem->Geo = mGeometries["shapeGeo"].get();
 		leftSphereRitem->PrimitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
-		leftSphereRitem->IndexCount = leftSphereRitem->Geo->DrawArgs["sphere"].IndexCount;
-		leftSphereRitem->StartIndexLocation = leftSphereRitem->Geo->DrawArgs["sphere"].StartIndexLocation;
-		leftSphereRitem->BaseVertexLocation = leftSphereRitem->Geo->DrawArgs["sphere"].BaseVertexLocation;
+		leftSphereRitem->IndexCount = leftSphereRitem->Geo->submeshGeometries["sphere"].IndexCount;
+		leftSphereRitem->StartIndexLocation = leftSphereRitem->Geo->submeshGeometries["sphere"].StartIndexLocation;
+		leftSphereRitem->BaseVertexLocation = leftSphereRitem->Geo->submeshGeometries["sphere"].BaseVertexLocation;
 
 		XMStoreFloat4x4(&rightSphereRitem->World, rightSphereWorld);
 		rightSphereRitem->ObjCBIndex = objCBIndex++;
 		rightSphereRitem->Geo = mGeometries["shapeGeo"].get();
 		rightSphereRitem->PrimitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
-		rightSphereRitem->IndexCount = rightSphereRitem->Geo->DrawArgs["sphere"].IndexCount;
-		rightSphereRitem->StartIndexLocation = rightSphereRitem->Geo->DrawArgs["sphere"].StartIndexLocation;
-		rightSphereRitem->BaseVertexLocation = rightSphereRitem->Geo->DrawArgs["sphere"].BaseVertexLocation;
+		rightSphereRitem->IndexCount = rightSphereRitem->Geo->submeshGeometries["sphere"].IndexCount;
+		rightSphereRitem->StartIndexLocation = rightSphereRitem->Geo->submeshGeometries["sphere"].StartIndexLocation;
+		rightSphereRitem->BaseVertexLocation = rightSphereRitem->Geo->submeshGeometries["sphere"].BaseVertexLocation;
 
 		mAllRitems.push_back(std::move(leftCylRitem));
 		mAllRitems.push_back(std::move(rightCylRitem));

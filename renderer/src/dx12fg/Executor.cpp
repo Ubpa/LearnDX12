@@ -9,6 +9,7 @@ void FG::Executor::Execute(
 	const Ubpa::FG::Compiler::Result& crst,
 	RsrcMngr& rsrcMngr)
 {
+	rsrcMngr.DHReserve(crst);
 	const auto& passnodes = fg.GetPassNodes();
 	for (auto passNodeIdx : crst.sortedPasses) {
 		const auto& passinfo = crst.idx2info.find(passNodeIdx)->second;

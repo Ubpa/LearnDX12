@@ -16,7 +16,7 @@ namespace Ubpa::DX12::FG {
 			return *this;
 		}
 
-		void Clear() {
+		void NewFrame() {
 			passFuncs.clear();
 		}
 

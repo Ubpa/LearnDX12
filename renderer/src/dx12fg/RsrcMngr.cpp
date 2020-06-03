@@ -2,60 +2,164 @@
 
 using namespace Ubpa::DX12;
 
-void FG::RsrcMngr::Clear() {
-	// pool.clear();
-
+void FG::RsrcMngr::NewFrame() {
 	importeds.clear();
 	temporals.clear();
 	passNodeIdx2rsrcs.clear();
 	actives.clear();
 
-	// ================
+	assert(srvDHfree.size() == srvDH.Size());
+	assert(rtvDHfree.size() == rtvDH.Size());
+	assert(dsvDHfree.size() == dsvDH.Size());
+	assert(srvDHused.empty());
+	assert(rtvDHused.empty());
+	assert(dsvDHused.empty());
 
-	UINT srvDH_target_size = 128;
-	UINT rtvDH_target_size = 128;
-	UINT dsvDH_target_size = 128;
+	assert(impls.empty());
+}
 
-	if (srvDH.IsNull() || srvDH.raw->GetDesc().NumDescriptors < srvDH_target_size) {
-		srvDH.Create(uDevice.raw.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, srvDH_target_size, true);
-		srvDHfree.clear();
-		for (UINT i = 0; i < srvDH_target_size; i++)
-			srvDHfree.push_back(i);
-	}
-	else {
-		for (auto i : srvDHused)
-			srvDHfree.push_back(i);
+void FG::RsrcMngr::Clear() {
+	NewFrame();
+	rsrcKeeper.clear();
+	pool.clear();
+}
+
+void FG::RsrcMngr::SrvDHReserve(UINT num) {
+	assert(srvDHused.empty());
+
+	UINT origSize = srvDH.Size();
+	if (origSize >= num)
+		return;
+
+	srvDH.Create(uDevice.raw.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, num, true);
+
+	for (UINT i = origSize; i < num; i++)
+		srvDHfree.push_back(i);
+}
+
+void FG::RsrcMngr::RtvDHReserve(UINT num) {
+	assert(rtvDHused.empty());
+
+	UINT origSize = rtvDH.Size();
+	if (origSize >= num)
+		return;
+
+	rtvDH.Create(uDevice.raw.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_RTV, num, false);
+
+	for (UINT i = origSize; i < num; i++)
+		rtvDHfree.push_back(i);
+}
+
+void FG::RsrcMngr::DsvDHReserve(UINT num) {
+	assert(dsvDHused.empty());
+
+	UINT origSize = dsvDH.Size();
+	if (dsvDH.Size() >= num)
+		return;
+
+	dsvDH.Create(uDevice.raw.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_DSV, num, false);
+
+	for (UINT i = origSize; i < num; i++)
+		dsvDHfree.push_back(i);
+}
+
+void FG::RsrcMngr::DHReserve(const Ubpa::FG::Compiler::Result& crst) {
+	UINT maxSRV = 0;
+	UINT maxRTV = 0;
+	UINT maxDSV = 0;
+	UINT curSRV = 0;
+	UINT curRTV = 0;
+	UINT curDSV = 0;
+	
+	struct DHRecord {
+		std::unordered_set<D3D12_DEPTH_STENCIL_VIEW_DESC>   descs_dsv;
+		std::unordered_set<D3D12_RENDER_TARGET_VIEW_DESC>   descs_rtv;
+		std::unordered_set<D3D12_SHADER_RESOURCE_VIEW_DESC> descs_srv;
+
+		bool null_dsv{ false };
+		bool null_rtv{ false };
+		bool null_srv{ false };
+	};
+	std::unordered_map<size_t, DHRecord> rsrc2record;
+	for (auto passNodeIdx : crst.sortedPasses) {
+		for (const auto& [rsrcNodeIdx, state, desc] : passNodeIdx2rsrcs[passNodeIdx]) {
+			auto& record = rsrc2record[rsrcNodeIdx];
+			std::visit([&](const auto& desc) {
+				using T = std::decay_t<decltype(desc)>;
+				if constexpr (std::is_same_v<T, D3D12_SHADER_RESOURCE_VIEW_DESC>)
+				{
+					if (record.descs_srv.find(desc) != record.descs_srv.end())
+						return;
+					record.descs_srv.insert(desc);
+					curSRV++;
+					if (curSRV > maxSRV)
+						maxSRV = curSRV;
+				}
+				else if constexpr (std::is_same_v<T, D3D12_RENDER_TARGET_VIEW_DESC>)
+				{
+					if (record.descs_rtv.find(desc) != record.descs_rtv.end())
+						return;
+					record.descs_rtv.insert(desc);
+					curRTV++;
+					if (curRTV > maxRTV)
+						maxRTV = curRTV;
+				}
+				else if constexpr (std::is_same_v<T, D3D12_DEPTH_STENCIL_VIEW_DESC>)
+				{
+					if (record.descs_dsv.find(desc) != record.descs_dsv.end())
+						return;
+					record.descs_dsv.insert(desc);
+					curDSV++;
+					if (curDSV > maxDSV)
+						maxDSV = curDSV;
+				}
+				else if constexpr (std::is_same_v<T, RsrcImplDesc_SRV_NULL>) {
+					if (record.null_srv)
+						return;
+					record.null_srv = true;
+					curSRV++;
+					if (curSRV > maxSRV)
+						maxSRV = curSRV;
+				}
+				else if constexpr (std::is_same_v<T, RsrcImplDesc_RTV_Null>) {
+					if (record.null_rtv)
+						return;
+					record.null_rtv = true;
+					curRTV++;
+					if (curRTV > maxRTV)
+						maxRTV = curRTV;
+				}
+				else if constexpr (std::is_same_v<T, RsrcImplDesc_DSV_Null>) {
+					if (record.null_dsv)
+						return;
+					record.null_dsv = true;
+					curDSV++;
+					if (curDSV > maxDSV)
+						maxDSV = curDSV;
+				}
+				else
+					static_assert(always_false_v<T>, "non-exhaustive visitor!");
+				}, desc);
+		}
+		const auto& info = crst.idx2info.find(passNodeIdx)->second;
+		for (auto rsrcNodeIdx : info.destructRsrcs) {
+			const auto& record = rsrc2record[rsrcNodeIdx];
+
+			curSRV -= static_cast<UINT>(record.descs_srv.size());
+			curRTV -= static_cast<UINT>(record.descs_rtv.size());
+			curDSV -= static_cast<UINT>(record.descs_dsv.size());
+
+			curSRV -= record.null_srv;
+			curRTV -= record.null_rtv;
+			curDSV -= record.null_dsv;
+
+			rsrc2record.erase(rsrcNodeIdx);
+		}
 	}
 
-	if (rtvDH.IsNull() || rtvDH.raw->GetDesc().NumDescriptors < rtvDH_target_size) {
-		rtvDH.Create(uDevice.raw.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_RTV, rtvDH_target_size, false);
-		rtvDHfree.clear();
-		for (UINT i = 0; i < rtvDH_target_size; i++)
-			rtvDHfree.push_back(i);
-	}
-	else {
-		for (auto i : rtvDHused)
-			rtvDHfree.push_back(i);
-	}
-
-	if (dsvDH.IsNull() || dsvDH.raw->GetDesc().NumDescriptors < dsvDH_target_size) {
-		dsvDH.Create(uDevice.raw.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_DSV, dsvDH_target_size, false);
-		dsvDHfree.clear();
-		for (UINT i = 0; i < dsvDH_target_size; i++)
-			dsvDHfree.push_back(i);
-	}
-	else {
-		for (auto i : dsvDHused)
-			dsvDHfree.push_back(i);
-	}
-
-	srvDHused.clear();
-	rtvDHused.clear();
-	dsvDHused.clear();
-
-	rsrc2idxSrvDH.clear();
-	rsrc2idxRtvDH.clear();
-	rsrc2idxDsvDH.clear();
+	SrvDHReserve(maxSRV);
+	RtvDHReserve(maxRTV);
+	DsvDHReserve(maxDSV);
 }
 
 void FG::RsrcMngr::Construct(size_t rsrcNodeIdx) {
@@ -107,8 +211,35 @@ void FG::RsrcMngr::Destruct(size_t rsrcNodeIdx) {
 		}
 		//cout << "[Destruct] Import | " << name << " @" << rsrc.buffer << endl;
 	}
-
 	actives.erase(rsrcNodeIdx);
+
+	const auto& indices = impls[rsrcNodeIdx];
+	for (auto [desv, idx] : indices.desc2idx_srv) {
+		srvDHused.erase(idx);
+		srvDHfree.push_back(idx);
+	}
+	for (auto [desv, idx] : indices.desc2idx_rtv) {
+		rtvDHused.erase(idx);
+		rtvDHfree.push_back(idx);
+	}
+	for (auto [desv, idx] : indices.desc2idx_dsv) {
+		dsvDHused.erase(idx);
+		dsvDHfree.push_back(idx);
+	}
+	if (indices.nullidx_srv != static_cast<UINT>(-1)) {
+		srvDHused.erase(indices.nullidx_srv);
+		srvDHfree.push_back(indices.nullidx_srv);
+	}
+	if (indices.nullidx_rtv != static_cast<UINT>(-1)) {
+		rtvDHused.erase(indices.nullidx_rtv);
+		rtvDHfree.push_back(indices.nullidx_rtv);
+	}
+	if (indices.nullidx_dsv != static_cast<UINT>(-1)) {
+		dsvDHused.erase(indices.nullidx_dsv);
+		dsvDHfree.push_back(indices.nullidx_dsv);
+	}
+
+	impls.erase(rsrcNodeIdx);
 }
 
 FG::PassRsrcs FG::RsrcMngr::RequestPassRsrcs(size_t passNodeIdx) {
@@ -116,6 +247,7 @@ FG::PassRsrcs FG::RsrcMngr::RequestPassRsrcs(size_t passNodeIdx) {
 	const auto& rsrcStates = passNodeIdx2rsrcs[passNodeIdx];
 	for (const auto& [rsrcNodeIdx, state, desc] : rsrcStates) {
 		auto& view = actives[rsrcNodeIdx];
+		auto& implMaps = impls[rsrcNodeIdx];
 
 		if (view.state != state) {
 			uGCmdList.ResourceBarrier(
@@ -128,26 +260,36 @@ FG::PassRsrcs FG::RsrcMngr::RequestPassRsrcs(size_t passNodeIdx) {
 		passRsrc[rsrcNodeIdx] = std::visit([&](const auto& desc) -> RsrcImplHandle {
 			using T = std::decay_t<decltype(desc)>;
 
+			UINT* pIdx;
+
 			if constexpr (std::is_same_v<T, D3D12_SHADER_RESOURCE_VIEW_DESC>
 				|| std::is_same_v<T, RsrcImplDesc_SRV_NULL>)
 			{
-				UINT idx;
+				if constexpr (std::is_same_v<T, D3D12_SHADER_RESOURCE_VIEW_DESC>) {
+					auto target_idx = implMaps.desc2idx_srv.find(desc);
+					if (target_idx != implMaps.desc2idx_srv.end())
+						pIdx = &target_idx->second;
+					else {
+						pIdx = &implMaps.desc2idx_srv[desc];
+						*pIdx = static_cast<UINT>(-1);
+					}
+				}
+				else // std::is_same_v<T, RsrcImplDesc_SRV_NULL>
+					pIdx = &implMaps.nullidx_srv;
 
-				const D3D12_SHADER_RESOURCE_VIEW_DESC* pdesc;
-				if constexpr (std::is_same_v<T, D3D12_SHADER_RESOURCE_VIEW_DESC>)
-					pdesc = &desc;
-				else
-					pdesc = nullptr;
+				UINT& idx = *pIdx;
+				if (idx == static_cast<UINT>(-1)) {
+					idx = srvDHfree.back();
+					srvDHfree.pop_back();
+					srvDHused.insert(idx);
 
-				auto target = rsrc2idxSrvDH.find(view.pRsrc);
-				if (target != rsrc2idxSrvDH.end())
-					idx = target->second;
-				else {
-					idx = rtvDHfree.back();
-					rtvDHfree.pop_back();
-					rtvDHused.insert(idx);
+					const D3D12_SHADER_RESOURCE_VIEW_DESC* pdesc;
+					if constexpr (std::is_same_v<T, D3D12_SHADER_RESOURCE_VIEW_DESC>)
+						pdesc = &desc;
+					else
+						pdesc = nullptr;
+
 					uDevice->CreateShaderResourceView(view.pRsrc, pdesc, rtvDH.hCPU(idx));
-					rsrc2idxSrvDH[view.pRsrc] = idx;
 				}
 
 				return { srvDH.hCPU(idx), srvDH.hGPU(idx) };
@@ -155,23 +297,31 @@ FG::PassRsrcs FG::RsrcMngr::RequestPassRsrcs(size_t passNodeIdx) {
 			else if constexpr (std::is_same_v<T, D3D12_RENDER_TARGET_VIEW_DESC>
 				|| std::is_same_v<T, RsrcImplDesc_RTV_Null>)
 			{
-				UINT idx;
+				if constexpr (std::is_same_v<T, D3D12_RENDER_TARGET_VIEW_DESC>) {
+					auto target_idx = implMaps.desc2idx_rtv.find(desc);
+					if (target_idx != implMaps.desc2idx_rtv.end())
+						pIdx = &target_idx->second;
+					else {
+						pIdx = &implMaps.desc2idx_rtv[desc];
+						*pIdx = static_cast<UINT>(-1);
+					}
+				}
+				else // std::is_same_v<T, RsrcImplDesc_SRV_NULL>
+					pIdx = &implMaps.nullidx_rtv;
 
-				const D3D12_RENDER_TARGET_VIEW_DESC* pdesc;
-				if constexpr (std::is_same_v<T, D3D12_RENDER_TARGET_VIEW_DESC>)
-					pdesc = &desc;
-				else
-					pdesc = nullptr;
-
-				auto target = rsrc2idxRtvDH.find(view.pRsrc);
-				if (target != rsrc2idxRtvDH.end())
-					idx = target->second;
-				else {
+				UINT& idx = *pIdx;
+				if (idx == static_cast<UINT>(-1)) {
 					idx = rtvDHfree.back();
 					rtvDHfree.pop_back();
 					rtvDHused.insert(idx);
+
+					const D3D12_RENDER_TARGET_VIEW_DESC* pdesc;
+					if constexpr (std::is_same_v<T, D3D12_RENDER_TARGET_VIEW_DESC>)
+						pdesc = &desc;
+					else
+						pdesc = nullptr;
+
 					uDevice->CreateRenderTargetView(view.pRsrc, pdesc, rtvDH.hCPU(idx));
-					rsrc2idxRtvDH[view.pRsrc] = idx;
 				}
 
 				return { rtvDH.hCPU(idx), {0} };
@@ -179,23 +329,31 @@ FG::PassRsrcs FG::RsrcMngr::RequestPassRsrcs(size_t passNodeIdx) {
 			else if constexpr (std::is_same_v<T, D3D12_DEPTH_STENCIL_VIEW_DESC>
 				|| std::is_same_v<T, RsrcImplDesc_DSV_Null>)
 			{
-				UINT idx;
+				if constexpr (std::is_same_v<T, D3D12_DEPTH_STENCIL_VIEW_DESC>) {
+					auto target_idx = implMaps.desc2idx_dsv.find(desc);
+					if (target_idx != implMaps.desc2idx_dsv.end())
+						pIdx = &target_idx->second;
+					else {
+						pIdx = &implMaps.desc2idx_dsv[desc];
+						*pIdx = static_cast<UINT>(-1);
+					}
+				}
+				else // std::is_same_v<T, RsrcImplDesc_SRV_NULL>
+					pIdx = &implMaps.nullidx_dsv;
 
-				const D3D12_DEPTH_STENCIL_VIEW_DESC* pdesc;
-				if constexpr (std::is_same_v<T, D3D12_DEPTH_STENCIL_VIEW_DESC>)
-					pdesc = &desc;
-				else
-					pdesc = nullptr;
-
-				auto target = rsrc2idxDsvDH.find(view.pRsrc);
-				if (target != rsrc2idxDsvDH.end())
-					idx = target->second;
-				else {
+				UINT& idx = *pIdx;
+				if (idx == static_cast<UINT>(-1)) {
 					idx = dsvDHfree.back();
 					dsvDHfree.pop_back();
 					dsvDHused.insert(idx);
+
+					const D3D12_DEPTH_STENCIL_VIEW_DESC* pdesc;
+					if constexpr (std::is_same_v<T, D3D12_DEPTH_STENCIL_VIEW_DESC>)
+						pdesc = &desc;
+					else
+						pdesc = nullptr;
+
 					uDevice->CreateDepthStencilView(view.pRsrc, pdesc, dsvDH.hCPU(idx));
-					rsrc2idxDsvDH[view.pRsrc] = idx;
 				}
 
 				return { dsvDH.hCPU(idx), {0} };

@@ -10,6 +10,7 @@
 #endif
 
 #include "d3dUtil.h"
+
 #include "GameTimer.h"
 
 // Link necessary d3d12 libraries.
@@ -130,9 +131,5 @@ protected:
     Ubpa::DX12::Device uDevice;
     Ubpa::DX12::CmdQueue uCmdQueue;
     Ubpa::DX12::GCmdList uGCmdList;
-    Ubpa::DX12::FG::RsrcMngr fgRsrcMngr;
-    Ubpa::DX12::FG::Executor fgExecutor;
-    Ubpa::FG::Compiler fgCompiler;
-    Ubpa::FG::FrameGraph fg;
 };
 

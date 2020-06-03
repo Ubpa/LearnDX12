@@ -130,6 +130,12 @@ private:
 	float mRadius = 2.5f;
 
     POINT mLastMousePos;
+
+	// frame graph
+	Ubpa::DX12::FG::RsrcMngr fgRsrcMngr;
+	Ubpa::DX12::FG::Executor fgExecutor;
+	Ubpa::FG::Compiler fgCompiler;
+	Ubpa::FG::FrameGraph fg;
 };
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prevInstance,
@@ -170,6 +176,8 @@ bool DeferApp::Initialize()
 {
     if(!D3DApp::Initialize())
         return false;
+
+	fgRsrcMngr.Init(uGCmdList, uDevice);
 
     // Reset the command list to prep for initialization commands.
     ThrowIfFailed(uGCmdList->Reset(mDirectCmdListAlloc.Get(), nullptr));
@@ -250,8 +258,8 @@ void DeferApp::Draw(const GameTimer& gt)
 	uGCmdList->RSSetScissorRects(1, &mScissorRect);
 
 	fg.Clear();
-	fgRsrcMngr.Clear();
-	fgExecutor.Clear();
+	fgRsrcMngr.NewFrame();
+	fgExecutor.NewFrame();;
 
 	auto backbuffer = fg.AddResourceNode("Back Buffer");
 	auto depthstencil = fg.AddResourceNode("Depth Stencil");
@@ -269,7 +277,7 @@ void DeferApp::Draw(const GameTimer& gt)
 
 	fgRsrcMngr
 		.RegisterImportedRsrc(backbuffer, { CurrentBackBuffer(), D3D12_RESOURCE_STATE_PRESENT })
-		.RegisterImportedRsrc(depthstencil, { mDepthStencilBuffer.Get(), D3D12_RESOURCE_STATE_PRESENT })
+		.RegisterImportedRsrc(depthstencil, { mDepthStencilBuffer.Get(), D3D12_RESOURCE_STATE_DEPTH_WRITE })
 		.RegisterPassRsrcs(pass, backbuffer, D3D12_RESOURCE_STATE_RENDER_TARGET,
 			Ubpa::DX12::FG::RsrcImplDesc_RTV_Null{})
 		.RegisterPassRsrcs(pass, depthstencil, D3D12_RESOURCE_STATE_DEPTH_WRITE, dsvDesc);
@@ -630,7 +638,7 @@ void DeferApp::BuildShapeGeometry()
 	geo->IndexFormat = DXGI_FORMAT_R16_UINT;
 	geo->IndexBufferByteSize = ibByteSize;
 
-	geo->DrawArgs["box"] = boxSubmesh;
+	geo->submeshGeometries["box"] = boxSubmesh;
 
 	mGeometries[geo->Name] = std::move(geo);
 }
@@ -697,9 +705,9 @@ void DeferApp::BuildRenderItems()
 	boxRitem->Mat = mMaterials["woodCrate"].get();
 	boxRitem->Geo = mGeometries["boxGeo"].get();
 	boxRitem->PrimitiveType = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
-	boxRitem->IndexCount = boxRitem->Geo->DrawArgs["box"].IndexCount;
-	boxRitem->StartIndexLocation = boxRitem->Geo->DrawArgs["box"].StartIndexLocation;
-	boxRitem->BaseVertexLocation = boxRitem->Geo->DrawArgs["box"].BaseVertexLocation;
+	boxRitem->IndexCount = boxRitem->Geo->submeshGeometries["box"].IndexCount;
+	boxRitem->StartIndexLocation = boxRitem->Geo->submeshGeometries["box"].StartIndexLocation;
+	boxRitem->BaseVertexLocation = boxRitem->Geo->submeshGeometries["box"].BaseVertexLocation;
 	mAllRitems.push_back(std::move(boxRitem));
 
 	// All the render items are opaque.

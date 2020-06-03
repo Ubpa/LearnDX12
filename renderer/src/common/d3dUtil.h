@@ -32,6 +32,8 @@
 #include "DDSTextureLoader.h"
 #include "MathHelper.h"
 
+#include <UDX12/_deps/DirectXTK12/ResourceUploadBatch.h>
+
 extern const int gNumFrameResources;
 
 inline void d3dSetDebugName(IDXGIObject* obj, const char* name)

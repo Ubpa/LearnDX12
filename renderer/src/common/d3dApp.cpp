@@ -112,8 +112,6 @@ bool D3DApp::Initialize()
 	if(!InitDirect3D())
 		return false;
 
-	fgRsrcMngr.Init(uGCmdList, uDevice);
-
     // Do the initial resize code.
     OnResize();
 	

@@ -2,7 +2,7 @@
 
 #include "Rsrc.h"
 
-#include "detail/RsrcMngr.inl"
+#include <UFG/UFG.h>
 
 #include <unordered_set>
 
@@ -14,6 +14,8 @@ namespace Ubpa::DX12::FG {
 			this->uDevice = uDevice;
 		}
 
+		void NewFrame();
+		void DHReserve(const Ubpa::FG::Compiler::Result& crst);
 		void Clear();
 
 		void Construct(size_t rsrcNodeIdx);
@@ -41,6 +43,10 @@ namespace Ubpa::DX12::FG {
 		}
 
 	private:
+		void SrvDHReserve(UINT num);
+		void DsvDHReserve(UINT num);
+		void RtvDHReserve(UINT num);
+
 		GCmdList uGCmdList;
 		Device uDevice;
 
@@ -50,6 +56,7 @@ namespace Ubpa::DX12::FG {
 
 		// rsrcNodeIdx -> view
 		std::unordered_map<size_t, SRsrcView> importeds;
+
 		// rsrcNodeIdx -> type
 		std::unordered_map<size_t, RsrcType> temporals;
 		// passNodeIdx -> vector<(rsrcNodeIdx, RsrcState, RsrcImplDesc)>
@@ -57,24 +64,29 @@ namespace Ubpa::DX12::FG {
 		// rsrcNodeIdx -> view
 		std::unordered_map<size_t, SRsrcView> actives;
 
+		struct DHIndices {
+			std::unordered_map<D3D12_DEPTH_STENCIL_VIEW_DESC, UINT>   desc2idx_dsv;
+			std::unordered_map<D3D12_RENDER_TARGET_VIEW_DESC, UINT>   desc2idx_rtv;
+			std::unordered_map<D3D12_SHADER_RESOURCE_VIEW_DESC, UINT> desc2idx_srv;
+
+			UINT nullidx_dsv{ static_cast<UINT>(-1) };
+			UINT nullidx_rtv{ static_cast<UINT>(-1) };
+			UINT nullidx_srv{ static_cast<UINT>(-1) };
+		};
+		// rsrcNodeIdx -> type
+		std::unordered_map<size_t, DHIndices> impls;
 
 		DescriptorHeap srvDH;
 		std::vector<UINT> srvDHfree;
 		std::unordered_set<UINT> srvDHused;
-		// rsrc ptr -> index in srvDH
-		std::unordered_map<Rsrc*, UINT> rsrc2idxSrvDH;
 
 		DescriptorHeap rtvDH;
 		std::vector<UINT> rtvDHfree;
 		std::unordered_set<UINT> rtvDHused;
-		// rsrc ptr -> index in rtvDH
-		std::unordered_map<Rsrc*, UINT> rsrc2idxRtvDH;
 
 		DescriptorHeap dsvDH;
 		std::vector<UINT> dsvDHfree;
 		std::unordered_set<UINT> dsvDHused;
-		// rsrc ptr -> index in dsvDH
-		std::unordered_map<Rsrc*, UINT> rsrc2idxDsvDH;
 	};
 
 }

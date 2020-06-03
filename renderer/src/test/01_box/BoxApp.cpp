@@ -14,6 +14,9 @@
 
 #include <UDX12/UDX12.h>
 
+#include <UDX12/_deps/DirectXTK12/ResourceUploadBatch.h>
+#include <UDX12/_deps/DirectXTK12/BufferHelpers.h>
+
 #include "../../dx12fg/dx12fg.h"
 
 #include <UFG/FrameGraph.h>
@@ -56,7 +59,7 @@ private:
 	void BuildConstantBuffers();
     void BuildRootSignature();
     void BuildShadersAndInputLayout();
-    void BuildBoxGeometry();
+    void BuildBoxGeometry(DirectX::ResourceUploadBatch&);
     void BuildPSO();
 
 private:
@@ -84,6 +87,12 @@ private:
     float mRadius = 5.0f;
 
     POINT mLastMousePos;
+
+    // frame graph
+    Ubpa::DX12::FG::RsrcMngr fgRsrcMngr;
+    Ubpa::DX12::FG::Executor fgExecutor;
+    Ubpa::FG::Compiler fgCompiler;
+    Ubpa::FG::FrameGraph fg;
 };
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prevInstance,
@@ -123,6 +132,11 @@ bool BoxApp::Initialize()
     if(!D3DApp::Initialize())
 		return false;
 
+    fgRsrcMngr.Init(uGCmdList, uDevice);
+
+    DirectX::ResourceUploadBatch upload(uDevice.raw.Get());
+    upload.Begin();
+
     // Reset the command list to prep for initialization commands.
     ThrowIfFailed(uGCmdList->Reset(mDirectCmdListAlloc.Get(), nullptr));
  
@@ -130,12 +144,14 @@ bool BoxApp::Initialize()
 	BuildConstantBuffers();
     BuildRootSignature();
     BuildShadersAndInputLayout();
-    BuildBoxGeometry();
+    BuildBoxGeometry(upload);
     BuildPSO();
 
     // Execute the initialization commands.
     ThrowIfFailed(uGCmdList->Close());
     uCmdQueue.Execute(uGCmdList.raw.Get());
+
+    upload.End(uCmdQueue.raw.Get()).wait();
 
     // Wait until initialization is complete.
     FlushCommandQueue();
@@ -146,6 +162,8 @@ bool BoxApp::Initialize()
 void BoxApp::OnResize()
 {
 	D3DApp::OnResize();
+
+    fgRsrcMngr.NewFrame();
 
     // The window resized, so update the aspect ratio and recompute the projection matrix.
     XMMATRIX P = XMMatrixPerspectiveFovLH(0.25f*MathHelper::Pi, AspectRatio(), 1.0f, 1000.0f);
@@ -195,8 +213,8 @@ void BoxApp::Draw(const GameTimer& gt)
     uGCmdList.RSSetScissorRect(mScissorRect);
 
     fg.Clear();
-    fgRsrcMngr.Clear();
-    fgExecutor.Clear();
+    fgRsrcMngr.NewFrame();
+    fgExecutor.NewFrame();;
 
     auto backbuffer = fg.AddResourceNode("Back Buffer");
     auto depthstencil = fg.AddResourceNode("Depth Stencil");
@@ -206,6 +224,8 @@ void BoxApp::Draw(const GameTimer& gt)
         { backbuffer,depthstencil }
     );
 
+    auto [success, crst] = fgCompiler.Compile(fg);
+
     D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc;
     dsvDesc.Flags = D3D12_DSV_FLAG_NONE;
     dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
@@ -214,7 +234,7 @@ void BoxApp::Draw(const GameTimer& gt)
 
     fgRsrcMngr
         .RegisterImportedRsrc(backbuffer, { CurrentBackBuffer(), D3D12_RESOURCE_STATE_PRESENT })
-        .RegisterImportedRsrc(depthstencil, { mDepthStencilBuffer.Get(), D3D12_RESOURCE_STATE_PRESENT })
+        .RegisterImportedRsrc(depthstencil, { mDepthStencilBuffer.Get(), D3D12_RESOURCE_STATE_DEPTH_WRITE })
         .RegisterPassRsrcs(pass, backbuffer, D3D12_RESOURCE_STATE_RENDER_TARGET,
             Ubpa::DX12::FG::RsrcImplDesc_RTV_Null{})
         .RegisterPassRsrcs(pass, depthstencil, D3D12_RESOURCE_STATE_DEPTH_WRITE, dsvDesc);
@@ -236,11 +256,10 @@ void BoxApp::Draw(const GameTimer& gt)
 
         uGCmdList->SetGraphicsRootDescriptorTable(0, mCbvHeap->GetGPUDescriptorHandleForHeapStart());
 
-        uGCmdList.DrawIndexed(mBoxGeo->DrawArgs["box"].IndexCount, 0, 0);
+        uGCmdList.DrawIndexed(mBoxGeo->submeshGeometries["box"].IndexCount, 0, 0);
 #pragma endregion
         });
 
-    auto [success, crst] = fgCompiler.Compile(fg);
     fgExecutor.Execute(fg, crst, fgRsrcMngr);
 
     // Done recording commands.
@@ -397,7 +416,7 @@ void BoxApp::BuildShadersAndInputLayout()
     };
 }
 
-void BoxApp::BuildBoxGeometry()
+void BoxApp::BuildBoxGeometry(DirectX::ResourceUploadBatch& upload)
 {
     // TODO: use UGM
     std::array<Vertex, 8> vertices =
@@ -455,11 +474,17 @@ void BoxApp::BuildBoxGeometry()
     Ubpa::DX12::Blob indexbuffer{ mBoxGeo->IndexBufferCPU };
     vertexbuffer.Create(indices.data(), ibByteSize);
 
-	mBoxGeo->VertexBufferGPU = Ubpa::DX12::Util::CreateDefaultBuffer(uDevice.raw.Get(),
+    /*mBoxGeo->VertexBufferGPU = Ubpa::DX12::Util::CreateDefaultBuffer(uDevice.raw.Get(),
         uGCmdList.raw.Get(), vertices.data(), vbByteSize, mBoxGeo->VertexBufferUploader);
 
-	mBoxGeo->IndexBufferGPU = Ubpa::DX12::Util::CreateDefaultBuffer(uDevice.raw.Get(),
-        uGCmdList.raw.Get(), indices.data(), ibByteSize, mBoxGeo->IndexBufferUploader);
+    mBoxGeo->IndexBufferGPU = Ubpa::DX12::Util::CreateDefaultBuffer(uDevice.raw.Get(),
+        uGCmdList.raw.Get(), indices.data(), ibByteSize, mBoxGeo->IndexBufferUploader);*/
+
+    DirectX::CreateStaticBuffer(uDevice.raw.Get(), upload, vertices, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER,
+        mBoxGeo->VertexBufferGPU.GetAddressOf());
+
+    DirectX::CreateStaticBuffer(uDevice.raw.Get(), upload, indices, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER,
+        mBoxGeo->IndexBufferGPU.GetAddressOf());
 
 	mBoxGeo->VertexByteStride = sizeof(Vertex);
 	mBoxGeo->VertexBufferByteSize = vbByteSize;
@@ -471,7 +496,7 @@ void BoxApp::BuildBoxGeometry()
 	submesh.StartIndexLocation = 0;
 	submesh.BaseVertexLocation = 0;
 
-	mBoxGeo->DrawArgs["box"] = submesh;
+	mBoxGeo->submeshGeometries["box"] = submesh;
 }
 
 void BoxApp::BuildPSO()
