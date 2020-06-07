@@ -102,7 +102,8 @@ private:
 
     ComPtr<ID3D12RootSignature> mRootSignature = nullptr;
 
-	ComPtr<ID3D12DescriptorHeap> mSrvDescriptorHeap = nullptr;
+	//ComPtr<ID3D12DescriptorHeap> mSrvDescriptorHeap = nullptr;
+	Ubpa::DX12::DescriptorHeapAllocation mSrvDescriptorHeap;
 
 	std::unordered_map<std::string, std::unique_ptr<Ubpa::DX12::MeshGeometry>> mGeometries;
 	std::unordered_map<std::string, std::unique_ptr<Material>> mMaterials;
@@ -176,6 +177,8 @@ bool CrateApp::Initialize()
 {
     if(!D3DApp::Initialize())
         return false;
+
+	Ubpa::DX12::DescriptorHeapMngr::Instance().Init(uDevice.raw.Get(), 1024, 1024, 1024, 1024, 1024);
 
 	fgRsrcMngr.Init(uGCmdList, uDevice);
 
@@ -257,6 +260,7 @@ void CrateApp::Draw(const GameTimer& gt)
     // Reusing the command list reuses memory.
     ThrowIfFailed(uGCmdList->Reset(cmdListAlloc.Get(), mOpaquePSO.Get()));
 
+	uGCmdList.SetDescriptorHeaps(Ubpa::DX12::DescriptorHeapMngr::Instance().GetCSUGpuDH()->GetDescriptorHeap());
 	uGCmdList->RSSetViewports(1, &mScreenViewport);
 	uGCmdList->RSSetScissorRects(1, &mScissorRect);
 
@@ -295,7 +299,7 @@ void CrateApp::Draw(const GameTimer& gt)
 			// Specify the buffers we are going to render to.
 			uGCmdList.OMSetRenderTarget(rsrcs.find(backbuffer)->second.cpuHandle, rsrcs.find(depthstencil)->second.cpuHandle);
 
-			uGCmdList.SetDescriptorHeaps(mSrvDescriptorHeap.Get());
+			//uGCmdList.SetDescriptorHeaps(mSrvDescriptorHeap.Get());
 
 			uGCmdList->SetGraphicsRootSignature(mRootSignature.Get());
 
@@ -532,6 +536,7 @@ void CrateApp::BuildRootSignature()
 
 	// Perfomance TIP: Order from most frequent to least frequent.
 	slotRootParameter[0].InitAsDescriptorTable(1, &texTable, D3D12_SHADER_VISIBILITY_PIXEL);
+	//slotRootParameter[0].InitAsShaderResourceView(0, 0, D3D12_SHADER_VISIBILITY_PIXEL);
     slotRootParameter[1].InitAsConstantBufferView(0);
     slotRootParameter[2].InitAsConstantBufferView(1);
     slotRootParameter[3].InitAsConstantBufferView(2);
@@ -567,16 +572,19 @@ void CrateApp::BuildDescriptorHeaps()
 	//
 	// Create the SRV heap.
 	//
-	D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {};
+	/*D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {};
 	srvHeapDesc.NumDescriptors = 1;
 	srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
 	srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-	ThrowIfFailed(uDevice->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&mSrvDescriptorHeap)));
+	ThrowIfFailed(uDevice->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&mSrvDescriptorHeap)));*/
+
+	mSrvDescriptorHeap = Ubpa::DX12::DescriptorHeapMngr::Instance().GetCSUGpuDH()->Allocate(1);
 
 	//
 	// Fill out the heap with actual descriptors.
 	//
-	CD3DX12_CPU_DESCRIPTOR_HANDLE hDescriptor(mSrvDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+	/*CD3DX12_CPU_DESCRIPTOR_HANDLE hDescriptor(mSrvDescriptorHeap->GetCPUDescriptorHandleForHeapStart());*/
+	CD3DX12_CPU_DESCRIPTOR_HANDLE hDescriptor(mSrvDescriptorHeap.GetCpuHandle());
 
 	auto woodCrateTex = mTextures["woodCrateTex"]->Resource;
  
@@ -739,13 +747,15 @@ void CrateApp::DrawRenderItems(ID3D12GraphicsCommandList* cmdList, const std::ve
         cmdList->IASetIndexBuffer(&ri->Geo->IndexBufferView());
         cmdList->IASetPrimitiveTopology(ri->PrimitiveType);
 
-		CD3DX12_GPU_DESCRIPTOR_HANDLE tex(mSrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+		/*CD3DX12_GPU_DESCRIPTOR_HANDLE tex(mSrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());*/
+		CD3DX12_GPU_DESCRIPTOR_HANDLE tex(mSrvDescriptorHeap.GetGpuHandle());
 		tex.Offset(ri->Mat->DiffuseSrvHeapIndex, mCbvSrvDescriptorSize);
 
         D3D12_GPU_VIRTUAL_ADDRESS objCBAddress = objectCB->GetGPUVirtualAddress() + ri->ObjCBIndex*objCBByteSize;
 		D3D12_GPU_VIRTUAL_ADDRESS matCBAddress = matCB->GetGPUVirtualAddress() + ri->Mat->MatCBIndex*matCBByteSize;
 
 		cmdList->SetGraphicsRootDescriptorTable(0, tex);
+		//cmdList->SetGraphicsRootShaderResourceView(0, mTextures["woodCrate"]->Resource->GetGPUVirtualAddress());
         cmdList->SetGraphicsRootConstantBufferView(1, objCBAddress);
         cmdList->SetGraphicsRootConstantBufferView(3, matCBAddress);
 

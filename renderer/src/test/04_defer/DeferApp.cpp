@@ -102,7 +102,8 @@ private:
 
     ComPtr<ID3D12RootSignature> mRootSignature = nullptr;
 
-	ComPtr<ID3D12DescriptorHeap> mSrvDescriptorHeap = nullptr;
+	//ComPtr<ID3D12DescriptorHeap> mSrvDescriptorHeap = nullptr;
+	Ubpa::DX12::DescriptorHeapAllocation mSrvDescriptorHeap;
 
 	std::unordered_map<std::string, std::unique_ptr<Ubpa::DX12::MeshGeometry>> mGeometries;
 	std::unordered_map<std::string, std::unique_ptr<Material>> mMaterials;
@@ -176,6 +177,8 @@ bool DeferApp::Initialize()
 {
     if(!D3DApp::Initialize())
         return false;
+
+	Ubpa::DX12::DescriptorHeapMngr::Instance().Init(uDevice.raw.Get(), 1024, 1024, 1024, 1024, 1024);
 
 	fgRsrcMngr.Init(uGCmdList, uDevice);
 
@@ -258,6 +261,7 @@ void DeferApp::Draw(const GameTimer& gt)
     // Reusing the command list reuses memory.
     ThrowIfFailed(uGCmdList->Reset(cmdListAlloc.Get(), mOpaquePSO.Get()));
 
+	uGCmdList.SetDescriptorHeaps(Ubpa::DX12::DescriptorHeapMngr::Instance().GetCSUGpuDH()->GetDescriptorHeap());
 	uGCmdList->RSSetViewports(1, &mScreenViewport);
 	uGCmdList->RSSetScissorRects(1, &mScissorRect);
 
@@ -296,7 +300,7 @@ void DeferApp::Draw(const GameTimer& gt)
 			// Specify the buffers we are going to render to.
 			uGCmdList.OMSetRenderTarget(rsrcs.find(backbuffer)->second.cpuHandle, rsrcs.find(depthstencil)->second.cpuHandle);
 
-			uGCmdList.SetDescriptorHeaps(mSrvDescriptorHeap.Get());
+			//uGCmdList.SetDescriptorHeaps(mSrvDescriptorHeap.Get());
 
 			uGCmdList->SetGraphicsRootSignature(mRootSignature.Get());
 
@@ -333,6 +337,12 @@ void DeferApp::Draw(const GameTimer& gt)
  //   // Indicate a state transition on the resource usage.
 	//uGCmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
 	//	D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
+
+	static bool flag = false;
+	if (!flag) {
+		flag = true;
+		OutputDebugString(Ubpa::DX12::Util::AnsiToWString(fg.ToGraphvizGraph().Dump()).c_str());
+	}
 
 	auto [success, crst] = fgCompiler.Compile(fg);
 	fgExecutor.Execute(fg, crst, fgRsrcMngr);
@@ -568,16 +578,19 @@ void DeferApp::BuildDescriptorHeaps()
 	//
 	// Create the SRV heap.
 	//
-	D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {};
+	/*D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {};
 	srvHeapDesc.NumDescriptors = 1;
 	srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
 	srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-	ThrowIfFailed(uDevice->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&mSrvDescriptorHeap)));
+	ThrowIfFailed(uDevice->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&mSrvDescriptorHeap)));*/
+
+	mSrvDescriptorHeap = Ubpa::DX12::DescriptorHeapMngr::Instance().GetCSUGpuDH()->Allocate(1);
 
 	//
 	// Fill out the heap with actual descriptors.
 	//
-	CD3DX12_CPU_DESCRIPTOR_HANDLE hDescriptor(mSrvDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+	/*CD3DX12_CPU_DESCRIPTOR_HANDLE hDescriptor(mSrvDescriptorHeap->GetCPUDescriptorHandleForHeapStart());*/
+	CD3DX12_CPU_DESCRIPTOR_HANDLE hDescriptor(mSrvDescriptorHeap.GetCpuHandle());
 
 	auto woodCrateTex = mTextures["woodCrateTex"]->Resource;
  
@@ -740,7 +753,8 @@ void DeferApp::DrawRenderItems(ID3D12GraphicsCommandList* cmdList, const std::ve
         cmdList->IASetIndexBuffer(&ri->Geo->IndexBufferView());
         cmdList->IASetPrimitiveTopology(ri->PrimitiveType);
 
-		CD3DX12_GPU_DESCRIPTOR_HANDLE tex(mSrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+		/*CD3DX12_GPU_DESCRIPTOR_HANDLE tex(mSrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());*/
+		CD3DX12_GPU_DESCRIPTOR_HANDLE tex(mSrvDescriptorHeap.GetGpuHandle());
 		tex.Offset(ri->Mat->DiffuseSrvHeapIndex, mCbvSrvDescriptorSize);
 
         D3D12_GPU_VIRTUAL_ADDRESS objCBAddress = objectCB->GetGPUVirtualAddress() + ri->ObjCBIndex*objCBByteSize;

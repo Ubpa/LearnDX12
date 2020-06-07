@@ -7,16 +7,26 @@
 #include <unordered_set>
 
 namespace Ubpa::DX12::FG {
+	// manage per pass resources
+	// CBV, SRV, UAV, RTV, DSV
 	class RsrcMngr {
 	public:
+		~RsrcMngr();
+
 		void Init(GCmdList uGCmdList, Device uDevice) {
 			this->uGCmdList = uGCmdList;
 			this->uDevice = uDevice;
+			cusDynamicDH = new DynamicSuballocMngr{
+				*DescriptorHeapMngr::Instance().GetCSUGpuDH(),
+				256,
+				"RsrcMngr::cusDynamicDH" };
 		}
 
 		void NewFrame();
-		void DHReserve(const Ubpa::FG::Compiler::Result& crst);
+		void DHReserve();
 		void Clear();
+
+		void AllocateHandle();
 
 		void Construct(size_t rsrcNodeIdx);
 		void Destruct(size_t rsrcNodeIdx);
@@ -38,12 +48,16 @@ namespace Ubpa::DX12::FG {
 			return *this;
 		}
 
+		RsrcMngr& RegisterRsrcTable(const std::vector<std::tuple<size_t, RsrcImplDesc>>& rsrcNodeIndices);
+
 		bool IsImported(size_t rsrcNodeIdx) const noexcept {
 			return importeds.find(rsrcNodeIdx) != importeds.end();
 		}
 
 	private:
-		void SrvDHReserve(UINT num);
+		// CSU : CBV, CSU, UAV
+
+		void CSUDHReserve(UINT num);
 		void DsvDHReserve(UINT num);
 		void RtvDHReserve(UINT num);
 
@@ -64,27 +78,56 @@ namespace Ubpa::DX12::FG {
 		// rsrcNodeIdx -> view
 		std::unordered_map<size_t, SRsrcView> actives;
 
-		struct DHIndices {
-			std::unordered_map<D3D12_DEPTH_STENCIL_VIEW_DESC, UINT>   desc2idx_dsv;
-			std::unordered_map<D3D12_RENDER_TARGET_VIEW_DESC, UINT>   desc2idx_rtv;
-			std::unordered_map<D3D12_SHADER_RESOURCE_VIEW_DESC, UINT> desc2idx_srv;
+		struct DHHandles {
+			struct CpuGpuInfo {
+				D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle{ 0 };
+				D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle{ 0 };
+				bool init{ false };
+			};
+			struct CpuInfo {
+				D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle{ 0 };
+				bool init{ false };
+			};
+			std::unordered_map<D3D12_CONSTANT_BUFFER_VIEW_DESC, CpuGpuInfo>         desc2info_cbv;
+			std::unordered_map<D3D12_SHADER_RESOURCE_VIEW_DESC, CpuGpuInfo>         desc2info_srv;
+			std::unordered_map<D3D12_UNORDERED_ACCESS_VIEW_DESC, CpuGpuInfo>         desc2info_uav;
 
-			UINT nullidx_dsv{ static_cast<UINT>(-1) };
-			UINT nullidx_rtv{ static_cast<UINT>(-1) };
-			UINT nullidx_srv{ static_cast<UINT>(-1) };
+			std::unordered_map<D3D12_RENDER_TARGET_VIEW_DESC, CpuInfo>   desc2info_rtv;
+			std::unordered_map<D3D12_DEPTH_STENCIL_VIEW_DESC, CpuInfo>   desc2info_dsv;
+
+			CpuGpuInfo null_info_srv;
+			CpuGpuInfo null_info_uav;
+
+			CpuInfo null_info_dsv;
+			CpuInfo null_info_rtv;
+
+			bool HaveNullSrv() const {
+				return null_info_srv.cpuHandle.ptr != 0;
+			}
+			bool HaveNullUav() const {
+				return null_info_uav.cpuHandle.ptr != 0;
+			}
+			bool HaveNullDsv() const {
+				return null_info_dsv.cpuHandle.ptr != 0;
+			}
+			bool HaveNullRtv() const {
+				return null_info_rtv.cpuHandle.ptr != 0;
+			}
 		};
 		// rsrcNodeIdx -> type
-		std::unordered_map<size_t, DHIndices> impls;
+		std::unordered_map<size_t, DHHandles> handleMap;
+		
+		DynamicSuballocMngr* cusDynamicDH{ nullptr };
 
-		DescriptorHeap srvDH;
-		std::vector<UINT> srvDHfree;
-		std::unordered_set<UINT> srvDHused;
+		DescriptorHeapAllocation csuDH;
+		std::vector<UINT> csuDHfree;
+		std::unordered_set<UINT> csuDHused;
 
-		DescriptorHeap rtvDH;
+		DescriptorHeapAllocation rtvDH;
 		std::vector<UINT> rtvDHfree;
 		std::unordered_set<UINT> rtvDHused;
 
-		DescriptorHeap dsvDH;
+		DescriptorHeapAllocation dsvDH;
 		std::vector<UINT> dsvDHfree;
 		std::unordered_set<UINT> dsvDHused;
 	};

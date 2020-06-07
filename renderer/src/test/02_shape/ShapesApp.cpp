@@ -92,7 +92,8 @@ private:
     int mCurrFrameResourceIndex = 0;
 
     ComPtr<ID3D12RootSignature> mRootSignature = nullptr;
-    ComPtr<ID3D12DescriptorHeap> mCbvHeap = nullptr;
+    //ComPtr<ID3D12DescriptorHeap> mCbvHeap = nullptr;
+    Ubpa::DX12::DescriptorHeapAllocation mCbvHeap;
 
 	ComPtr<ID3D12DescriptorHeap> mSrvDescriptorHeap = nullptr;
 
@@ -169,6 +170,8 @@ bool ShapesApp::Initialize()
 {
     if(!D3DApp::Initialize())
         return false;
+
+    Ubpa::DX12::DescriptorHeapMngr::Instance().Init(uDevice.raw.Get(), 1024, 1024, 1024, 1024, 1024);
 
     fgRsrcMngr.Init(uGCmdList, uDevice);
 
@@ -250,6 +253,7 @@ void ShapesApp::Draw(const GameTimer& gt)
         ThrowIfFailed(uGCmdList->Reset(cmdListAlloc.Get(), mPSOs["opaque"].Get()));
     }
 
+    uGCmdList.SetDescriptorHeaps(Ubpa::DX12::DescriptorHeapMngr::Instance().GetCSUGpuDH()->GetDescriptorHeap());
     uGCmdList->RSSetViewports(1, &mScreenViewport);
     uGCmdList->RSSetScissorRects(1, &mScissorRect);
 
@@ -288,14 +292,18 @@ void ShapesApp::Draw(const GameTimer& gt)
             // Specify the buffers we are going to render to.
             uGCmdList.OMSetRenderTarget(rsrcs.find(backbuffer)->second.cpuHandle, rsrcs.find(depthstencil)->second.cpuHandle);
 
-            uGCmdList.SetDescriptorHeaps(mCbvHeap.Get());
+            //uGCmdList.SetDescriptorHeaps(mCbvHeap.Get());
 
             uGCmdList->SetGraphicsRootSignature(mRootSignature.Get());
 
             int passCbvIndex = mPassCbvOffset + mCurrFrameResourceIndex;
-            auto passCbvHandle = CD3DX12_GPU_DESCRIPTOR_HANDLE(mCbvHeap->GetGPUDescriptorHandleForHeapStart());
-            passCbvHandle.Offset(passCbvIndex, mCbvSrvUavDescriptorSize);
-            uGCmdList->SetGraphicsRootDescriptorTable(1, passCbvHandle);
+            /*auto passCbvHandle = CD3DX12_GPU_DESCRIPTOR_HANDLE(mCbvHeap->GetGPUDescriptorHandleForHeapStart());
+            passCbvHandle.Offset(passCbvIndex, mCbvSrvUavDescriptorSize);*/
+            uGCmdList->SetGraphicsRootDescriptorTable(1, mCbvHeap.GetGpuHandle(passCbvIndex));
+
+            /*auto passCB = mFrameResources[mCurrFrameResourceIndex]->PassCB->Resource();
+            D3D12_GPU_VIRTUAL_ADDRESS cbAddress = passCB->GetGPUVirtualAddress();
+            uGCmdList->SetGraphicsRootConstantBufferView(1, cbAddress);*/
 
             DrawRenderItems(uGCmdList.raw.Get(), mOpaqueRitems);
         }
@@ -453,13 +461,15 @@ void ShapesApp::BuildDescriptorHeaps()
     // Save an offset to the start of the pass CBVs.  These are the last 3 descriptors.
     mPassCbvOffset = objCount * gNumFrameResources;
 
-    D3D12_DESCRIPTOR_HEAP_DESC cbvHeapDesc;
+    /*D3D12_DESCRIPTOR_HEAP_DESC cbvHeapDesc;
     cbvHeapDesc.NumDescriptors = numDescriptors;
     cbvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
     cbvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
     cbvHeapDesc.NodeMask = 0;
     ThrowIfFailed(uDevice->CreateDescriptorHeap(&cbvHeapDesc,
-        IID_PPV_ARGS(&mCbvHeap)));
+        IID_PPV_ARGS(&mCbvHeap)));*/
+
+    mCbvHeap = Ubpa::DX12::DescriptorHeapMngr::Instance().GetCSUGpuDH()->Allocate(numDescriptors);
 }
 
 void ShapesApp::BuildConstantBufferViews()
@@ -481,14 +491,15 @@ void ShapesApp::BuildConstantBufferViews()
 
             // Offset to the object cbv in the descriptor heap.
             int heapIndex = frameIndex*objCount + i;
-            auto handle = CD3DX12_CPU_DESCRIPTOR_HANDLE(mCbvHeap->GetCPUDescriptorHandleForHeapStart());
-            handle.Offset(heapIndex, mCbvSrvUavDescriptorSize);
+            /*auto handle = CD3DX12_CPU_DESCRIPTOR_HANDLE(mCbvHeap->GetCPUDescriptorHandleForHeapStart());
+            handle.Offset(heapIndex, mCbvSrvUavDescriptorSize);*/
 
             D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc;
             cbvDesc.BufferLocation = cbAddress;
             cbvDesc.SizeInBytes = objCBByteSize;
 
-            uDevice->CreateConstantBufferView(&cbvDesc, handle);
+            //uDevice->CreateConstantBufferView(&cbvDesc, handle);
+            uDevice->CreateConstantBufferView(&cbvDesc, mCbvHeap.GetCpuHandle(heapIndex));
         }
     }
 
@@ -502,14 +513,15 @@ void ShapesApp::BuildConstantBufferViews()
 
         // Offset to the pass cbv in the descriptor heap.
         int heapIndex = mPassCbvOffset + frameIndex;
-        auto handle = CD3DX12_CPU_DESCRIPTOR_HANDLE(mCbvHeap->GetCPUDescriptorHandleForHeapStart());
-        handle.Offset(heapIndex, mCbvSrvUavDescriptorSize);
+        /*auto handle = CD3DX12_CPU_DESCRIPTOR_HANDLE(mCbvHeap->GetCPUDescriptorHandleForHeapStart());
+        handle.Offset(heapIndex, mCbvSrvUavDescriptorSize);*/
 
         D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc;
         cbvDesc.BufferLocation = cbAddress;
         cbvDesc.SizeInBytes = passCBByteSize;
         
-        uDevice->CreateConstantBufferView(&cbvDesc, handle);
+        //uDevice->CreateConstantBufferView(&cbvDesc, handle);
+        uDevice->CreateConstantBufferView(&cbvDesc, mCbvHeap.GetCpuHandle(heapIndex));
     }
 }
 
@@ -527,6 +539,8 @@ void ShapesApp::BuildRootSignature()
 	// Create root CBVs.
     slotRootParameter[0].InitAsDescriptorTable(1, &cbvTable0);
     slotRootParameter[1].InitAsDescriptorTable(1, &cbvTable1);
+    //slotRootParameter[0].InitAsConstantBufferView(0);
+    //slotRootParameter[1].InitAsConstantBufferView(1);
 
 	// A root signature is an array of root parameters.
 	CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(2, slotRootParameter, 0, nullptr, 
@@ -841,10 +855,14 @@ void ShapesApp::DrawRenderItems(ID3D12GraphicsCommandList* cmdList, const std::v
 
         // Offset to the CBV in the descriptor heap for this object and for this frame resource.
         UINT cbvIndex = mCurrFrameResourceIndex*(UINT)mOpaqueRitems.size() + ri->ObjCBIndex;
-        auto cbvHandle = CD3DX12_GPU_DESCRIPTOR_HANDLE(mCbvHeap->GetGPUDescriptorHandleForHeapStart());
+        /*auto cbvHandle = CD3DX12_GPU_DESCRIPTOR_HANDLE(mCbvHeap->GetGPUDescriptorHandleForHeapStart());
         cbvHandle.Offset(cbvIndex, mCbvSrvUavDescriptorSize);
+        cmdList->SetGraphicsRootDescriptorTable(0, cbvHandle);*/
+        cmdList->SetGraphicsRootDescriptorTable(0, mCbvHeap.GetGpuHandle(cbvIndex));
 
-        cmdList->SetGraphicsRootDescriptorTable(0, cbvHandle);
+        /*D3D12_GPU_VIRTUAL_ADDRESS cbAddress = objectCB->GetGPUVirtualAddress();
+        cbAddress += i * objCBByteSize;
+        cmdList->SetGraphicsRootConstantBufferView(0, cbAddress);*/
 
         cmdList->DrawIndexedInstanced(ri->IndexCount, 1, ri->StartIndexLocation, ri->BaseVertexLocation, 0);
     }

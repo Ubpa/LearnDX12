@@ -1,6 +1,18 @@
 #include "RsrcMngr.h"
 
 using namespace Ubpa::DX12;
+using namespace std;
+
+FG::RsrcMngr::~RsrcMngr() {
+	if (!csuDH.IsNull())
+		DescriptorHeapMngr::Instance().GetCSUGpuDH()->Free(move(csuDH));
+	if (!rtvDH.IsNull())
+		DescriptorHeapMngr::Instance().GetRTVCpuDH()->Free(move(rtvDH));
+	if (!dsvDH.IsNull())
+		DescriptorHeapMngr::Instance().GetDSVCpuDH()->Free(move(dsvDH));
+	cusDynamicDH->ReleaseAllocations();
+	delete cusDynamicDH;
+}
 
 void FG::RsrcMngr::NewFrame() {
 	importeds.clear();
@@ -8,14 +20,20 @@ void FG::RsrcMngr::NewFrame() {
 	passNodeIdx2rsrcs.clear();
 	actives.clear();
 
-	assert(srvDHfree.size() == srvDH.Size());
-	assert(rtvDHfree.size() == rtvDH.Size());
-	assert(dsvDHfree.size() == dsvDH.Size());
-	assert(srvDHused.empty());
-	assert(rtvDHused.empty());
-	assert(dsvDHused.empty());
+	for (size_t idx : csuDHused)
+		csuDHfree.push_back(idx);
+	for (size_t idx : rtvDHused)
+		rtvDHfree.push_back(idx);
+	for (size_t idx : dsvDHused)
+		dsvDHfree.push_back(idx);
 
-	assert(impls.empty());
+	csuDHused.clear();
+	rtvDHused.clear();
+	dsvDHused.clear();
+
+	if(cusDynamicDH)
+		cusDynamicDH->ReleaseAllocations();
+	handleMap.clear();
 }
 
 void FG::RsrcMngr::Clear() {
@@ -24,27 +42,31 @@ void FG::RsrcMngr::Clear() {
 	pool.clear();
 }
 
-void FG::RsrcMngr::SrvDHReserve(UINT num) {
-	assert(srvDHused.empty());
+void FG::RsrcMngr::CSUDHReserve(UINT num) {
+	assert(csuDHused.empty());
 
-	UINT origSize = srvDH.Size();
+	UINT origSize = csuDH.GetNumHandles();
 	if (origSize >= num)
 		return;
 
-	srvDH.Create(uDevice.raw.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, num, true);
+	if (!csuDH.IsNull())
+		DescriptorHeapMngr::Instance().GetCSUGpuDH()->Free(move(csuDH));
+	csuDH = DescriptorHeapMngr::Instance().GetCSUGpuDH()->Allocate(num);
 
 	for (UINT i = origSize; i < num; i++)
-		srvDHfree.push_back(i);
+		csuDHfree.push_back(i);
 }
 
 void FG::RsrcMngr::RtvDHReserve(UINT num) {
 	assert(rtvDHused.empty());
 
-	UINT origSize = rtvDH.Size();
+	UINT origSize = rtvDH.GetNumHandles();
 	if (origSize >= num)
 		return;
 
-	rtvDH.Create(uDevice.raw.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_RTV, num, false);
+	if (!rtvDH.IsNull())
+		DescriptorHeapMngr::Instance().GetRTVCpuDH()->Free(move(rtvDH));
+	rtvDH = DescriptorHeapMngr::Instance().GetRTVCpuDH()->Allocate(num);
 
 	for (UINT i = origSize; i < num; i++)
 		rtvDHfree.push_back(i);
@@ -53,113 +75,105 @@ void FG::RsrcMngr::RtvDHReserve(UINT num) {
 void FG::RsrcMngr::DsvDHReserve(UINT num) {
 	assert(dsvDHused.empty());
 
-	UINT origSize = dsvDH.Size();
-	if (dsvDH.Size() >= num)
+	UINT origSize = dsvDH.GetNumHandles();
+	if (dsvDH.GetNumHandles() >= num)
 		return;
 
-	dsvDH.Create(uDevice.raw.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_DSV, num, false);
+	if (!dsvDH.IsNull())
+		DescriptorHeapMngr::Instance().GetDSVCpuDH()->Free(move(dsvDH));
+	dsvDH = DescriptorHeapMngr::Instance().GetDSVCpuDH()->Allocate(num);
 
 	for (UINT i = origSize; i < num; i++)
 		dsvDHfree.push_back(i);
 }
 
-void FG::RsrcMngr::DHReserve(const Ubpa::FG::Compiler::Result& crst) {
-	UINT maxSRV = 0;
-	UINT maxRTV = 0;
-	UINT maxDSV = 0;
-	UINT curSRV = 0;
-	UINT curRTV = 0;
-	UINT curDSV = 0;
+void FG::RsrcMngr::DHReserve() {
+	UINT numCSU = 0;
+	UINT numRTV = 0;
+	UINT numDSV = 0;
 	
 	struct DHRecord {
-		std::unordered_set<D3D12_DEPTH_STENCIL_VIEW_DESC>   descs_dsv;
-		std::unordered_set<D3D12_RENDER_TARGET_VIEW_DESC>   descs_rtv;
-		std::unordered_set<D3D12_SHADER_RESOURCE_VIEW_DESC> descs_srv;
+		std::unordered_set<D3D12_DEPTH_STENCIL_VIEW_DESC>    descs_dsv;
+		std::unordered_set<D3D12_RENDER_TARGET_VIEW_DESC>    descs_rtv;
+		std::unordered_set<D3D12_CONSTANT_BUFFER_VIEW_DESC>  descs_cbv;
+		std::unordered_set<D3D12_SHADER_RESOURCE_VIEW_DESC>  descs_srv;
+		std::unordered_set<D3D12_UNORDERED_ACCESS_VIEW_DESC> descs_uav;
 
 		bool null_dsv{ false };
 		bool null_rtv{ false };
+		bool null_cbv{ false };
 		bool null_srv{ false };
+		bool null_uav{ false };
 	};
 	std::unordered_map<size_t, DHRecord> rsrc2record;
-	for (auto passNodeIdx : crst.sortedPasses) {
-		for (const auto& [rsrcNodeIdx, state, desc] : passNodeIdx2rsrcs[passNodeIdx]) {
+	for (auto [passNodeIdx, rsrcs] : passNodeIdx2rsrcs) {
+		for (const auto& [rsrcNodeIdx, state, desc] : rsrcs) {
 			auto& record = rsrc2record[rsrcNodeIdx];
 			std::visit([&](const auto& desc) {
 				using T = std::decay_t<decltype(desc)>;
-				if constexpr (std::is_same_v<T, D3D12_SHADER_RESOURCE_VIEW_DESC>)
-				{
+				if constexpr (std::is_same_v<T, D3D12_CONSTANT_BUFFER_VIEW_DESC>) {
+					if (record.descs_cbv.find(desc) != record.descs_cbv.end())
+						return;
+					record.descs_cbv.insert(desc);
+					numCSU++;
+				}
+				else if constexpr (std::is_same_v<T, D3D12_SHADER_RESOURCE_VIEW_DESC>) {
 					if (record.descs_srv.find(desc) != record.descs_srv.end())
 						return;
 					record.descs_srv.insert(desc);
-					curSRV++;
-					if (curSRV > maxSRV)
-						maxSRV = curSRV;
+					numCSU++;
 				}
-				else if constexpr (std::is_same_v<T, D3D12_RENDER_TARGET_VIEW_DESC>)
-				{
+				else if constexpr (std::is_same_v<T, D3D12_UNORDERED_ACCESS_VIEW_DESC>) {
+					if (record.descs_uav.find(desc) != record.descs_uav.end())
+						return;
+					record.descs_uav.insert(desc);
+					numCSU++;
+				}
+				else if constexpr (std::is_same_v<T, D3D12_RENDER_TARGET_VIEW_DESC>) {
 					if (record.descs_rtv.find(desc) != record.descs_rtv.end())
 						return;
 					record.descs_rtv.insert(desc);
-					curRTV++;
-					if (curRTV > maxRTV)
-						maxRTV = curRTV;
+					numRTV++;
 				}
-				else if constexpr (std::is_same_v<T, D3D12_DEPTH_STENCIL_VIEW_DESC>)
-				{
+				else if constexpr (std::is_same_v<T, D3D12_DEPTH_STENCIL_VIEW_DESC>) {
 					if (record.descs_dsv.find(desc) != record.descs_dsv.end())
 						return;
 					record.descs_dsv.insert(desc);
-					curDSV++;
-					if (curDSV > maxDSV)
-						maxDSV = curDSV;
+					numDSV++;
 				}
 				else if constexpr (std::is_same_v<T, RsrcImplDesc_SRV_NULL>) {
 					if (record.null_srv)
 						return;
 					record.null_srv = true;
-					curSRV++;
-					if (curSRV > maxSRV)
-						maxSRV = curSRV;
+					numCSU++;
+				}
+				else if constexpr (std::is_same_v<T, RsrcImplDesc_UAV_NULL>) {
+					if (record.null_uav)
+						return;
+					record.null_uav = true;
+					numCSU++;
 				}
 				else if constexpr (std::is_same_v<T, RsrcImplDesc_RTV_Null>) {
 					if (record.null_rtv)
 						return;
 					record.null_rtv = true;
-					curRTV++;
-					if (curRTV > maxRTV)
-						maxRTV = curRTV;
+					numRTV++;
 				}
 				else if constexpr (std::is_same_v<T, RsrcImplDesc_DSV_Null>) {
 					if (record.null_dsv)
 						return;
 					record.null_dsv = true;
-					curDSV++;
-					if (curDSV > maxDSV)
-						maxDSV = curDSV;
+					numDSV++;
 				}
 				else
 					static_assert(always_false_v<T>, "non-exhaustive visitor!");
 				}, desc);
 		}
-		const auto& info = crst.idx2info.find(passNodeIdx)->second;
-		for (auto rsrcNodeIdx : info.destructRsrcs) {
-			const auto& record = rsrc2record[rsrcNodeIdx];
-
-			curSRV -= static_cast<UINT>(record.descs_srv.size());
-			curRTV -= static_cast<UINT>(record.descs_rtv.size());
-			curDSV -= static_cast<UINT>(record.descs_dsv.size());
-
-			curSRV -= record.null_srv;
-			curRTV -= record.null_rtv;
-			curDSV -= record.null_dsv;
-
-			rsrc2record.erase(rsrcNodeIdx);
-		}
 	}
 
-	SrvDHReserve(maxSRV);
-	RtvDHReserve(maxRTV);
-	DsvDHReserve(maxDSV);
+	CSUDHReserve(numCSU);
+	RtvDHReserve(numRTV);
+	DsvDHReserve(numDSV);
 }
 
 void FG::RsrcMngr::Construct(size_t rsrcNodeIdx) {
@@ -212,34 +226,151 @@ void FG::RsrcMngr::Destruct(size_t rsrcNodeIdx) {
 		//cout << "[Destruct] Import | " << name << " @" << rsrc.buffer << endl;
 	}
 	actives.erase(rsrcNodeIdx);
+}
 
-	const auto& indices = impls[rsrcNodeIdx];
-	for (auto [desv, idx] : indices.desc2idx_srv) {
-		srvDHused.erase(idx);
-		srvDHfree.push_back(idx);
+FG::RsrcMngr& FG::RsrcMngr::RegisterRsrcTable(const std::vector<std::tuple<size_t, RsrcImplDesc>>& rsrcNodeIndices) {
+	auto allocation = cusDynamicDH->Allocate(rsrcNodeIndices.size());
+	for (size_t i = 0; i < rsrcNodeIndices.size(); i++) {
+		const auto& [rsrcNodeIdx, desc] = rsrcNodeIndices[i];
+		auto& handles = handleMap[rsrcNodeIdx];
+		auto cpuHandle = allocation.GetCpuHandle(i);
+		auto gpuHandle = allocation.GetGpuHandle(i);
+		std::visit([&](const auto& desc) {
+			using T = std::decay_t<decltype(desc)>;
+			// CBV
+			if constexpr (std::is_same_v<T, D3D12_CONSTANT_BUFFER_VIEW_DESC>) {
+				handles.desc2info_cbv[desc].cpuHandle = cpuHandle;
+				handles.desc2info_cbv[desc].gpuHandle = gpuHandle;
+			}
+			// SRV
+			else if constexpr (std::is_same_v<T, D3D12_SHADER_RESOURCE_VIEW_DESC>) {
+				handles.desc2info_srv[desc].cpuHandle = cpuHandle;
+				handles.desc2info_srv[desc].gpuHandle = gpuHandle;
+			}
+			else if constexpr (std::is_same_v<T, RsrcImplDesc_SRV_NULL>) {
+				handles.null_info_srv.cpuHandle = cpuHandle;
+				handles.null_info_srv.gpuHandle = gpuHandle;
+			}
+			// UAV
+			else if constexpr (std::is_same_v<T, D3D12_UNORDERED_ACCESS_VIEW_DESC>) {
+				handles.desc2info_uav[desc].cpuHandle = cpuHandle;
+				handles.desc2info_uav[desc].gpuHandle = gpuHandle;
+			}
+			else if constexpr (std::is_same_v<T, RsrcImplDesc_UAV_NULL>) {
+				handles.null_info_uav.cpuHandle = cpuHandle;
+				handles.null_info_uav.gpuHandle = gpuHandle;
+			}
+			else
+				assert("CBV, SRV, UAV");
+			}, desc);
 	}
-	for (auto [desv, idx] : indices.desc2idx_rtv) {
-		rtvDHused.erase(idx);
-		rtvDHfree.push_back(idx);
-	}
-	for (auto [desv, idx] : indices.desc2idx_dsv) {
-		dsvDHused.erase(idx);
-		dsvDHfree.push_back(idx);
-	}
-	if (indices.nullidx_srv != static_cast<UINT>(-1)) {
-		srvDHused.erase(indices.nullidx_srv);
-		srvDHfree.push_back(indices.nullidx_srv);
-	}
-	if (indices.nullidx_rtv != static_cast<UINT>(-1)) {
-		rtvDHused.erase(indices.nullidx_rtv);
-		rtvDHfree.push_back(indices.nullidx_rtv);
-	}
-	if (indices.nullidx_dsv != static_cast<UINT>(-1)) {
-		dsvDHused.erase(indices.nullidx_dsv);
-		dsvDHfree.push_back(indices.nullidx_dsv);
-	}
+	return *this;
+}
 
-	impls.erase(rsrcNodeIdx);
+void FG::RsrcMngr::AllocateHandle() {
+	for (const auto& [passNodeIdx, rsrcs] : passNodeIdx2rsrcs) {
+		for (const auto& [rsrcNodeIdx, state, desc] : rsrcs) {
+			auto& handles = handleMap[rsrcNodeIdx];
+			std::visit([&](const auto & desc) {
+				using T = std::decay_t<decltype(desc)>;
+				// CBV
+				if constexpr (std::is_same_v<T, D3D12_CONSTANT_BUFFER_VIEW_DESC>) {
+					if (handles.desc2info_cbv.find(desc) != handles.desc2info_cbv.end())
+						return;
+					auto idx = csuDHfree.back();
+					csuDHfree.pop_back();
+					csuDHused.insert(idx);
+					handles.desc2info_cbv[desc] = { csuDH.GetCpuHandle(idx), csuDH.GetGpuHandle(idx), false };
+				}
+				// SRV
+				else if constexpr (std::is_same_v<T, D3D12_SHADER_RESOURCE_VIEW_DESC>
+					|| std::is_same_v<T, RsrcImplDesc_SRV_NULL>)
+				{
+					if constexpr (std::is_same_v<T, D3D12_SHADER_RESOURCE_VIEW_DESC>) {
+						if (handles.desc2info_srv.find(desc) != handles.desc2info_srv.end())
+							return;
+					}
+					else
+					{
+						if (handles.HaveNullSrv())
+							return;
+					}
+					auto idx = csuDHfree.back();
+					csuDHfree.pop_back();
+					csuDHused.insert(idx);
+					if constexpr (std::is_same_v<T, D3D12_SHADER_RESOURCE_VIEW_DESC>)
+						handles.desc2info_srv[desc] = { csuDH.GetCpuHandle(idx), csuDH.GetGpuHandle(idx), false };
+					else
+						handles.null_info_srv = { csuDH.GetCpuHandle(idx), csuDH.GetGpuHandle(idx), false };
+				}
+				// UAV
+				else if constexpr (std::is_same_v<T, D3D12_UNORDERED_ACCESS_VIEW_DESC>
+					|| std::is_same_v<T, RsrcImplDesc_UAV_NULL>)
+				{
+					if constexpr (std::is_same_v<T, D3D12_UNORDERED_ACCESS_VIEW_DESC>) {
+						if (handles.desc2info_uav.find(desc) != handles.desc2info_uav.end())
+							return;
+					}
+					else
+					{
+						if (handles.HaveNullUav())
+							return;
+					}
+					auto idx = csuDHfree.back();
+					csuDHfree.pop_back();
+					csuDHused.insert(idx);
+					if constexpr (std::is_same_v<T, D3D12_UNORDERED_ACCESS_VIEW_DESC>)
+						handles.desc2info_uav[desc] = { csuDH.GetCpuHandle(idx), csuDH.GetGpuHandle(idx), false };
+					else
+						handles.null_info_uav = { csuDH.GetCpuHandle(idx), csuDH.GetGpuHandle(idx), false };
+				}
+				// RTV
+				else if constexpr (std::is_same_v<T, D3D12_RENDER_TARGET_VIEW_DESC>
+					|| std::is_same_v<T, RsrcImplDesc_RTV_Null>)
+				{
+					if constexpr (std::is_same_v<T, D3D12_RENDER_TARGET_VIEW_DESC>) {
+						if (handles.desc2info_rtv.find(desc) != handles.desc2info_rtv.end())
+							return;
+					}
+					else
+					{
+						if (handles.HaveNullRtv())
+							return;
+					}
+					auto idx = rtvDHfree.back();
+					rtvDHfree.pop_back();
+					rtvDHused.insert(idx);
+					if constexpr (std::is_same_v<T, D3D12_RENDER_TARGET_VIEW_DESC>)
+						handles.desc2info_rtv[desc] = { rtvDH.GetCpuHandle(idx), false };
+					else
+						handles.null_info_rtv = { rtvDH.GetCpuHandle(idx), false };
+				}
+				// DSV
+				else if constexpr (std::is_same_v<T, D3D12_DEPTH_STENCIL_VIEW_DESC>
+					|| std::is_same_v<T, RsrcImplDesc_DSV_Null>)
+				{
+					if constexpr (std::is_same_v<T, D3D12_DEPTH_STENCIL_VIEW_DESC>) {
+						if (handles.desc2info_dsv.find(desc) != handles.desc2info_dsv.end())
+							return;
+					}
+					else
+					{
+						if (handles.HaveNullDsv())
+							return;
+					}
+					auto idx = dsvDHfree.back();
+					dsvDHfree.pop_back();
+					dsvDHused.insert(idx);
+					if constexpr (std::is_same_v<T, D3D12_DEPTH_STENCIL_VIEW_DESC>)
+						handles.desc2info_dsv[desc] = { dsvDH.GetCpuHandle(idx), false };
+					else
+						handles.null_info_dsv = { dsvDH.GetCpuHandle(idx), false };
+				}
+				else
+					static_assert(always_false_v<T>, "non-exhaustive visitor!");
+			}, desc);
+		}
+	}
 }
 
 FG::PassRsrcs FG::RsrcMngr::RequestPassRsrcs(size_t passNodeIdx) {
@@ -247,7 +378,7 @@ FG::PassRsrcs FG::RsrcMngr::RequestPassRsrcs(size_t passNodeIdx) {
 	const auto& rsrcStates = passNodeIdx2rsrcs[passNodeIdx];
 	for (const auto& [rsrcNodeIdx, state, desc] : rsrcStates) {
 		auto& view = actives[rsrcNodeIdx];
-		auto& implMaps = impls[rsrcNodeIdx];
+		auto& handles = handleMap[rsrcNodeIdx];
 
 		if (view.state != state) {
 			uGCmdList.ResourceBarrier(
@@ -257,106 +388,118 @@ FG::PassRsrcs FG::RsrcMngr::RequestPassRsrcs(size_t passNodeIdx) {
 			view.state = state;
 		}
 
-		passRsrc[rsrcNodeIdx] = std::visit([&](const auto& desc) -> RsrcImplHandle {
+		passRsrc[rsrcNodeIdx] = std::visit([&, rsrcNodeIdx = rsrcNodeIdx](const auto& desc) -> RsrcImplHandle {
 			using T = std::decay_t<decltype(desc)>;
 
-			UINT* pIdx;
+			if constexpr (std::is_same_v<T, D3D12_CONSTANT_BUFFER_VIEW_DESC>)
+			{
+				auto& info = handles.desc2info_cbv[desc];
 
-			if constexpr (std::is_same_v<T, D3D12_SHADER_RESOURCE_VIEW_DESC>
+				if (!info.init) {
+					assert(desc.BufferLocation == static_cast<D3D12_GPU_VIRTUAL_ADDRESS>(0)
+						|| IsImported(rsrcNodeIdx) && desc.BufferLocation == view.pRsrc->GetGPUVirtualAddress());
+
+					D3D12_CONSTANT_BUFFER_VIEW_DESC bindDesc = desc;
+					bindDesc.BufferLocation = view.pRsrc->GetGPUVirtualAddress();
+
+					uDevice->CreateConstantBufferView(&bindDesc, info.cpuHandle);
+
+					info.init = true;
+				}
+
+				return { info.cpuHandle, info.gpuHandle };
+			}
+			else if constexpr (std::is_same_v<T, D3D12_SHADER_RESOURCE_VIEW_DESC>
 				|| std::is_same_v<T, RsrcImplDesc_SRV_NULL>)
 			{
-				if constexpr (std::is_same_v<T, D3D12_SHADER_RESOURCE_VIEW_DESC>) {
-					auto target_idx = implMaps.desc2idx_srv.find(desc);
-					if (target_idx != implMaps.desc2idx_srv.end())
-						pIdx = &target_idx->second;
-					else {
-						pIdx = &implMaps.desc2idx_srv[desc];
-						*pIdx = static_cast<UINT>(-1);
-					}
-				}
+				DHHandles::CpuGpuInfo* info;
+				if constexpr (std::is_same_v<T, D3D12_SHADER_RESOURCE_VIEW_DESC>)
+					info = &handles.desc2info_srv[desc];
 				else // std::is_same_v<T, RsrcImplDesc_SRV_NULL>
-					pIdx = &implMaps.nullidx_srv;
+					info = &handles.null_info_srv;
 
-				UINT& idx = *pIdx;
-				if (idx == static_cast<UINT>(-1)) {
-					idx = srvDHfree.back();
-					srvDHfree.pop_back();
-					srvDHused.insert(idx);
-
+				if (!info->init) {
 					const D3D12_SHADER_RESOURCE_VIEW_DESC* pdesc;
 					if constexpr (std::is_same_v<T, D3D12_SHADER_RESOURCE_VIEW_DESC>)
 						pdesc = &desc;
 					else
 						pdesc = nullptr;
 
-					uDevice->CreateShaderResourceView(view.pRsrc, pdesc, rtvDH.hCPU(idx));
+					uDevice->CreateShaderResourceView(view.pRsrc, pdesc, info->cpuHandle);
+
+					info->init = true;
 				}
 
-				return { srvDH.hCPU(idx), srvDH.hGPU(idx) };
+				return { info->cpuHandle, info->gpuHandle };
+			}
+			else if constexpr (std::is_same_v<T, D3D12_UNORDERED_ACCESS_VIEW_DESC>
+				|| std::is_same_v<T, RsrcImplDesc_UAV_NULL>)
+			{
+				DHHandles::CpuGpuInfo* info;
+				if constexpr (std::is_same_v<T, D3D12_UNORDERED_ACCESS_VIEW_DESC>)
+					info = &handles.desc2info_uav[desc];
+				else // std::is_same_v<T, RsrcImplDesc_UAV_NULL>
+					info = &handles.null_info_uav;
+
+				if (!info->init) {
+					const D3D12_UNORDERED_ACCESS_VIEW_DESC* pdesc;
+					if constexpr (std::is_same_v<T, D3D12_UNORDERED_ACCESS_VIEW_DESC>)
+						pdesc = &desc;
+					else
+						pdesc = nullptr;
+
+					uDevice->CreateUnorderedAccessView(view.pRsrc, nullptr, pdesc, info->cpuHandle);
+
+					info->init = true;
+				}
+
+				return { info->cpuHandle, info->gpuHandle };
 			}
 			else if constexpr (std::is_same_v<T, D3D12_RENDER_TARGET_VIEW_DESC>
 				|| std::is_same_v<T, RsrcImplDesc_RTV_Null>)
 			{
-				if constexpr (std::is_same_v<T, D3D12_RENDER_TARGET_VIEW_DESC>) {
-					auto target_idx = implMaps.desc2idx_rtv.find(desc);
-					if (target_idx != implMaps.desc2idx_rtv.end())
-						pIdx = &target_idx->second;
-					else {
-						pIdx = &implMaps.desc2idx_rtv[desc];
-						*pIdx = static_cast<UINT>(-1);
-					}
-				}
-				else // std::is_same_v<T, RsrcImplDesc_SRV_NULL>
-					pIdx = &implMaps.nullidx_rtv;
+				DHHandles::CpuInfo* info;
+				if constexpr (std::is_same_v<T, D3D12_RENDER_TARGET_VIEW_DESC>)
+					info = &handles.desc2info_rtv[desc];
+				else // std::is_same_v<T, RsrcImplDesc_RTV_NULL>
+					info = &handles.null_info_rtv;
 
-				UINT& idx = *pIdx;
-				if (idx == static_cast<UINT>(-1)) {
-					idx = rtvDHfree.back();
-					rtvDHfree.pop_back();
-					rtvDHused.insert(idx);
-
+				if (!info->init) {
 					const D3D12_RENDER_TARGET_VIEW_DESC* pdesc;
 					if constexpr (std::is_same_v<T, D3D12_RENDER_TARGET_VIEW_DESC>)
 						pdesc = &desc;
 					else
 						pdesc = nullptr;
 
-					uDevice->CreateRenderTargetView(view.pRsrc, pdesc, rtvDH.hCPU(idx));
+					uDevice->CreateRenderTargetView(view.pRsrc, pdesc, info->cpuHandle);
+
+					info->init = true;
 				}
 
-				return { rtvDH.hCPU(idx), {0} };
+				return { info->cpuHandle, {0} };
 			}
 			else if constexpr (std::is_same_v<T, D3D12_DEPTH_STENCIL_VIEW_DESC>
 				|| std::is_same_v<T, RsrcImplDesc_DSV_Null>)
 			{
-				if constexpr (std::is_same_v<T, D3D12_DEPTH_STENCIL_VIEW_DESC>) {
-					auto target_idx = implMaps.desc2idx_dsv.find(desc);
-					if (target_idx != implMaps.desc2idx_dsv.end())
-						pIdx = &target_idx->second;
-					else {
-						pIdx = &implMaps.desc2idx_dsv[desc];
-						*pIdx = static_cast<UINT>(-1);
-					}
-				}
-				else // std::is_same_v<T, RsrcImplDesc_SRV_NULL>
-					pIdx = &implMaps.nullidx_dsv;
+				DHHandles::CpuInfo* info;
+				if constexpr (std::is_same_v<T, D3D12_DEPTH_STENCIL_VIEW_DESC>)
+					info = &handles.desc2info_dsv[desc];
+				else // std::is_same_v<T, RsrcImplDesc_RTV_NULL>
+					info = &handles.null_info_dsv;
 
-				UINT& idx = *pIdx;
-				if (idx == static_cast<UINT>(-1)) {
-					idx = dsvDHfree.back();
-					dsvDHfree.pop_back();
-					dsvDHused.insert(idx);
-
+				if (!info->init) {
 					const D3D12_DEPTH_STENCIL_VIEW_DESC* pdesc;
 					if constexpr (std::is_same_v<T, D3D12_DEPTH_STENCIL_VIEW_DESC>)
 						pdesc = &desc;
 					else
 						pdesc = nullptr;
 
-					uDevice->CreateDepthStencilView(view.pRsrc, pdesc, dsvDH.hCPU(idx));
+					uDevice->CreateDepthStencilView(view.pRsrc, pdesc, info->cpuHandle);
+
+					info->init = true;
 				}
 
-				return { dsvDH.hCPU(idx), {0} };
+				return { info->cpuHandle, {0} };
 			}
 			else
 				static_assert(always_false_v<T>, "non-exhaustive visitor!");

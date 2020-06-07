@@ -129,6 +129,7 @@ bool BoxApp::Initialize()
     if(!D3DApp::Initialize())
 		return false;
 
+    Ubpa::DX12::DescriptorHeapMngr::Instance().Init(uDevice.raw.Get(), 1024, 1024, 1024, 1024, 1024);
     fgRsrcMngr.Init(uGCmdList, uDevice);
 
     DirectX::ResourceUploadBatch upload(uDevice.raw.Get());
@@ -160,7 +161,7 @@ void BoxApp::OnResize()
 {
 	D3DApp::OnResize();
 
-    fgRsrcMngr.NewFrame();
+    fgRsrcMngr.Clear();
 
     // The window resized, so update the aspect ratio and recompute the projection matrix.
     XMMATRIX P = XMMatrixPerspectiveFovLH(0.25f*MathHelper::Pi, AspectRatio(), 1.0f, 1000.0f);
@@ -203,6 +204,8 @@ void BoxApp::Draw(const GameTimer& gt)
     //ThrowIfFailed(uGCmdList->Reset(mDirectCmdListAlloc.Get(), mPSO.Get()));
     uGCmdList.Reset(mDirectCmdListAlloc.Get(), mPSO.Get());
 
+    uGCmdList.SetDescriptorHeaps(Ubpa::DX12::DescriptorHeapMngr::Instance().GetCSUGpuDH()->GetDescriptorHeap());
+
     // 'RS' : Rasterizer
     //uGCmdList->RSSetViewports(1, &mScreenViewport);
     //uGCmdList->RSSetScissorRects(1, &mScissorRect);
@@ -243,7 +246,6 @@ void BoxApp::Draw(const GameTimer& gt)
         uGCmdList.OMSetRenderTarget(rsrcs.find(backbuffer)->second.cpuHandle, rsrcs.find(depthstencil)->second.cpuHandle);
 
 #pragma region core
-        uGCmdList.SetDescriptorHeaps(mCbvHeap.Get());
 
         uGCmdList->SetGraphicsRootSignature(mRootSignature.Get());
 
@@ -251,7 +253,8 @@ void BoxApp::Draw(const GameTimer& gt)
         uGCmdList->IASetIndexBuffer(&mBoxGeo->IndexBufferView());
         uGCmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-        uGCmdList->SetGraphicsRootDescriptorTable(0, mCbvHeap->GetGPUDescriptorHandleForHeapStart());
+        //uGCmdList->SetGraphicsRootDescriptorTable(0, mCbvHeap->GetGPUDescriptorHandleForHeapStart());
+        uGCmdList->SetGraphicsRootConstantBufferView(0, mObjectCB->Resource()->GetGPUVirtualAddress());
 
         uGCmdList.DrawIndexed(mBoxGeo->submeshGeometries["box"].IndexCount, 0, 0);
 #pragma endregion
@@ -374,9 +377,10 @@ void BoxApp::BuildRootSignature()
 	CD3DX12_ROOT_PARAMETER slotRootParameter[1];
 
 	// Create a single descriptor table of CBVs.
-	CD3DX12_DESCRIPTOR_RANGE cbvTable;
-	cbvTable.Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 0); // CBV 描述符范围，1 个，从 0 开始
-	slotRootParameter[0].InitAsDescriptorTable(1, &cbvTable); // 描述符表
+	//CD3DX12_DESCRIPTOR_RANGE cbvTable;
+	//cbvTable.Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 0); // CBV 描述符范围，1 个，从 0 开始
+	//slotRootParameter[0].InitAsDescriptorTable(1, &cbvTable); // 描述符表
+    slotRootParameter[0].InitAsConstantBufferView(0);
 
 	// A root signature is an array of root parameters.
 	CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(1, slotRootParameter, 0, nullptr, 
