@@ -2,8 +2,6 @@
 // DeferApp.cpp by Frank Luna (C) 2015 All Rights Reserved.
 //***************************************************************************************
 
-#include "../../dx12fg/dx12fg.h"
-
 #include "../../common/d3dApp.h"
 #include "../../common/MathHelper.h"
 #include <UDX12/UploadBuffer.h>

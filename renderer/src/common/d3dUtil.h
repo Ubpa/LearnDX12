@@ -7,7 +7,7 @@
 #pragma once
 
 #include <UDX12/UDX12.h>
-#include "../dx12fg/dx12fg.h"
+#include <UFG/DX12/dx12.h>
 
 #include <windows.h>
 #include <wrl.h>

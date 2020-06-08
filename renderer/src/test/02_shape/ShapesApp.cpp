@@ -4,15 +4,11 @@
 // Hold down '1' key to view scene in wireframe mode.
 //***************************************************************************************
 
-#include "../../dx12fg/dx12fg.h"
-
 #include "../../common/d3dApp.h"
 #include "../../common/MathHelper.h"
 #include <UDX12/UploadBuffer.h>
 #include "../../common/GeometryGenerator.h"
 #include "FrameResource.h"
-
-#include <UFG/FrameGraph.h>
 
 using Microsoft::WRL::ComPtr;
 using namespace DirectX;

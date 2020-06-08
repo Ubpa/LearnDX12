@@ -14,10 +14,6 @@
 
 #include <UDX12/UDX12.h>
 
-#include "../../dx12fg/dx12fg.h"
-
-#include <UFG/FrameGraph.h>
-
 using Microsoft::WRL::ComPtr;
 using namespace DirectX;
 using namespace DirectX::PackedVector;
