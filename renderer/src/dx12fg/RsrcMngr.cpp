@@ -20,11 +20,11 @@ void FG::RsrcMngr::NewFrame() {
 	passNodeIdx2rsrcs.clear();
 	actives.clear();
 
-	for (size_t idx : csuDHused)
+	for (const auto& idx : csuDHused)
 		csuDHfree.push_back(idx);
-	for (size_t idx : rtvDHused)
+	for (const auto& idx : rtvDHused)
 		rtvDHfree.push_back(idx);
-	for (size_t idx : dsvDHused)
+	for (const auto& idx : dsvDHused)
 		dsvDHfree.push_back(idx);
 
 	csuDHused.clear();
@@ -93,17 +93,17 @@ void FG::RsrcMngr::DHReserve() {
 	UINT numDSV = 0;
 	
 	struct DHRecord {
-		std::unordered_set<D3D12_DEPTH_STENCIL_VIEW_DESC>    descs_dsv;
-		std::unordered_set<D3D12_RENDER_TARGET_VIEW_DESC>    descs_rtv;
 		std::unordered_set<D3D12_CONSTANT_BUFFER_VIEW_DESC>  descs_cbv;
 		std::unordered_set<D3D12_SHADER_RESOURCE_VIEW_DESC>  descs_srv;
 		std::unordered_set<D3D12_UNORDERED_ACCESS_VIEW_DESC> descs_uav;
+		std::unordered_set<D3D12_RENDER_TARGET_VIEW_DESC>    descs_rtv;
+		std::unordered_set<D3D12_DEPTH_STENCIL_VIEW_DESC>    descs_dsv;
 
-		bool null_dsv{ false };
-		bool null_rtv{ false };
 		bool null_cbv{ false };
 		bool null_srv{ false };
 		bool null_uav{ false };
+		bool null_rtv{ false };
+		bool null_dsv{ false };
 	};
 	std::unordered_map<size_t, DHRecord> rsrc2record;
 	for (auto [passNodeIdx, rsrcs] : passNodeIdx2rsrcs) {
@@ -111,54 +111,63 @@ void FG::RsrcMngr::DHReserve() {
 			auto& record = rsrc2record[rsrcNodeIdx];
 			std::visit([&](const auto& desc) {
 				using T = std::decay_t<decltype(desc)>;
+				// CBV
 				if constexpr (std::is_same_v<T, D3D12_CONSTANT_BUFFER_VIEW_DESC>) {
 					if (record.descs_cbv.find(desc) != record.descs_cbv.end())
 						return;
 					record.descs_cbv.insert(desc);
 					numCSU++;
 				}
+				// SRV
 				else if constexpr (std::is_same_v<T, D3D12_SHADER_RESOURCE_VIEW_DESC>) {
 					if (record.descs_srv.find(desc) != record.descs_srv.end())
 						return;
 					record.descs_srv.insert(desc);
 					numCSU++;
 				}
+				// UAV
 				else if constexpr (std::is_same_v<T, D3D12_UNORDERED_ACCESS_VIEW_DESC>) {
 					if (record.descs_uav.find(desc) != record.descs_uav.end())
 						return;
 					record.descs_uav.insert(desc);
 					numCSU++;
 				}
+				// RTV
 				else if constexpr (std::is_same_v<T, D3D12_RENDER_TARGET_VIEW_DESC>) {
 					if (record.descs_rtv.find(desc) != record.descs_rtv.end())
 						return;
 					record.descs_rtv.insert(desc);
 					numRTV++;
 				}
+				// DTV
 				else if constexpr (std::is_same_v<T, D3D12_DEPTH_STENCIL_VIEW_DESC>) {
 					if (record.descs_dsv.find(desc) != record.descs_dsv.end())
 						return;
 					record.descs_dsv.insert(desc);
 					numDSV++;
 				}
+				// SRV null
 				else if constexpr (std::is_same_v<T, RsrcImplDesc_SRV_NULL>) {
 					if (record.null_srv)
 						return;
 					record.null_srv = true;
 					numCSU++;
 				}
+				// UAV null
 				else if constexpr (std::is_same_v<T, RsrcImplDesc_UAV_NULL>) {
 					if (record.null_uav)
 						return;
 					record.null_uav = true;
 					numCSU++;
 				}
+				// RTV null
 				else if constexpr (std::is_same_v<T, RsrcImplDesc_RTV_Null>) {
 					if (record.null_rtv)
 						return;
 					record.null_rtv = true;
 					numRTV++;
 				}
+				// DSV null
 				else if constexpr (std::is_same_v<T, RsrcImplDesc_DSV_Null>) {
 					if (record.null_dsv)
 						return;
@@ -229,8 +238,8 @@ void FG::RsrcMngr::Destruct(size_t rsrcNodeIdx) {
 }
 
 FG::RsrcMngr& FG::RsrcMngr::RegisterRsrcTable(const std::vector<std::tuple<size_t, RsrcImplDesc>>& rsrcNodeIndices) {
-	auto allocation = cusDynamicDH->Allocate(rsrcNodeIndices.size());
-	for (size_t i = 0; i < rsrcNodeIndices.size(); i++) {
+	auto allocation = cusDynamicDH->Allocate(static_cast<uint32_t>(rsrcNodeIndices.size()));
+	for (uint32_t i = 0; i < rsrcNodeIndices.size(); i++) {
 		const auto& [rsrcNodeIdx, desc] = rsrcNodeIndices[i];
 		auto& handles = handleMap[rsrcNodeIdx];
 		auto cpuHandle = allocation.GetCpuHandle(i);
@@ -290,8 +299,7 @@ void FG::RsrcMngr::AllocateHandle() {
 						if (handles.desc2info_srv.find(desc) != handles.desc2info_srv.end())
 							return;
 					}
-					else
-					{
+					else { // std::is_same_v<T, RsrcImplDesc_SRV_NULL>
 						if (handles.HaveNullSrv())
 							return;
 					}
@@ -311,8 +319,7 @@ void FG::RsrcMngr::AllocateHandle() {
 						if (handles.desc2info_uav.find(desc) != handles.desc2info_uav.end())
 							return;
 					}
-					else
-					{
+					else { // std::is_same_v<T, RsrcImplDesc_UAV_NULL>
 						if (handles.HaveNullUav())
 							return;
 					}
@@ -332,8 +339,7 @@ void FG::RsrcMngr::AllocateHandle() {
 						if (handles.desc2info_rtv.find(desc) != handles.desc2info_rtv.end())
 							return;
 					}
-					else
-					{
+					else { // std::is_same_v<T, RsrcImplDesc_RTV_Null>
 						if (handles.HaveNullRtv())
 							return;
 					}
@@ -353,8 +359,7 @@ void FG::RsrcMngr::AllocateHandle() {
 						if (handles.desc2info_dsv.find(desc) != handles.desc2info_dsv.end())
 							return;
 					}
-					else
-					{
+					else { // std::is_same_v<T, RsrcImplDesc_DSV_Null>
 						if (handles.HaveNullDsv())
 							return;
 					}

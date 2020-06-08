@@ -8,7 +8,7 @@
 
 #include "../../common/d3dApp.h"
 #include "../../common/MathHelper.h"
-#include "../../common/UploadBuffer.h"
+#include <UDX12/UploadBuffer.h>
 #include "../../common/GeometryGenerator.h"
 #include "FrameResource.h"
 
@@ -301,7 +301,7 @@ void ShapesApp::Draw(const GameTimer& gt)
             passCbvHandle.Offset(passCbvIndex, mCbvSrvUavDescriptorSize);*/
             uGCmdList->SetGraphicsRootDescriptorTable(1, mCbvHeap.GetGpuHandle(passCbvIndex));
 
-            /*auto passCB = mFrameResources[mCurrFrameResourceIndex]->PassCB->Resource();
+            /*auto passCB = mFrameResources[mCurrFrameResourceIndex]->PassCB->GetResource();
             D3D12_GPU_VIRTUAL_ADDRESS cbAddress = passCB->GetGPUVirtualAddress();
             uGCmdList->SetGraphicsRootConstantBufferView(1, cbAddress);*/
 
@@ -414,7 +414,7 @@ void ShapesApp::UpdateObjectCBs(const GameTimer& gt)
 			ObjectConstants objConstants;
 			XMStoreFloat4x4(&objConstants.World, XMMatrixTranspose(world));
 
-			currObjectCB->CopyData(e->ObjCBIndex, objConstants);
+			currObjectCB->Set(e->ObjCBIndex, objConstants);
 
 			// Next FrameResource need to be updated too.
 			e->NumFramesDirty--;
@@ -447,7 +447,7 @@ void ShapesApp::UpdateMainPassCB(const GameTimer& gt)
 	mMainPassCB.DeltaTime = gt.DeltaTime();
 
 	auto currPassCB = mCurrFrameResource->PassCB.get();
-	currPassCB->CopyData(0, mMainPassCB);
+	currPassCB->Set(0, mMainPassCB);
 }
 
 void ShapesApp::BuildDescriptorHeaps()
@@ -481,7 +481,7 @@ void ShapesApp::BuildConstantBufferViews()
     // Need a CBV descriptor for each object for each frame resource.
     for(int frameIndex = 0; frameIndex < gNumFrameResources; ++frameIndex)
     {
-        auto objectCB = mFrameResources[frameIndex]->ObjectCB->Resource();
+        auto objectCB = mFrameResources[frameIndex]->ObjectCB->GetResource();
         for(UINT i = 0; i < objCount; ++i)
         {
             D3D12_GPU_VIRTUAL_ADDRESS cbAddress = objectCB->GetGPUVirtualAddress();
@@ -508,7 +508,7 @@ void ShapesApp::BuildConstantBufferViews()
     // Last three descriptors are the pass CBVs for each frame resource.
     for(int frameIndex = 0; frameIndex < gNumFrameResources; ++frameIndex)
     {
-        auto passCB = mFrameResources[frameIndex]->PassCB->Resource();
+        auto passCB = mFrameResources[frameIndex]->PassCB->GetResource();
         D3D12_GPU_VIRTUAL_ADDRESS cbAddress = passCB->GetGPUVirtualAddress();
 
         // Offset to the pass cbv in the descriptor heap.
@@ -695,8 +695,8 @@ void ShapesApp::BuildShapeGeometry(DirectX::ResourceUploadBatch& upload)
 	geo->IndexBufferByteSize = ibByteSize;*/
 
     geo->InitBuffer(uDevice.raw.Get(), upload,
-        vertices.data(), (UINT)vertices.size(), sizeof(Vertex), true,
-        indices.data(), (UINT)indices.size(), DXGI_FORMAT_R16_UINT, true);
+        vertices.data(), (UINT)vertices.size(), sizeof(Vertex),
+        indices.data(), (UINT)indices.size(), DXGI_FORMAT_R16_UINT);
 
 	geo->submeshGeometries["box"] = boxSubmesh;
 	geo->submeshGeometries["grid"] = gridSubmesh;
@@ -842,7 +842,7 @@ void ShapesApp::DrawRenderItems(ID3D12GraphicsCommandList* cmdList, const std::v
 {
     UINT objCBByteSize = Ubpa::DX12::Util::CalcConstantBufferByteSize(sizeof(ObjectConstants));
  
-	auto objectCB = mCurrFrameResource->ObjectCB->Resource();
+	auto objectCB = mCurrFrameResource->ObjectCB->GetResource();
 
     // For each render item...
     for(size_t i = 0; i < ritems.size(); ++i)

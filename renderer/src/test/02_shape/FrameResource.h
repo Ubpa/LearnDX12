@@ -2,7 +2,7 @@
 
 #include "../../common/d3dUtil.h"
 #include "../../common/MathHelper.h"
-#include "../../common/UploadBuffer.h"
+#include <UDX12/UploadBuffer.h>
 
 struct ObjectConstants
 {
@@ -50,8 +50,8 @@ public:
 
     // We cannot update a cbuffer until the GPU is done processing the commands
     // that reference it.  So each frame needs their own cbuffers.
-    std::unique_ptr<UploadBuffer<PassConstants>> PassCB = nullptr;
-    std::unique_ptr<UploadBuffer<ObjectConstants>> ObjectCB = nullptr;
+    std::unique_ptr<Ubpa::DX12::ArrayUploadBuffer<PassConstants>> PassCB = nullptr;
+    std::unique_ptr<Ubpa::DX12::ArrayUploadBuffer<ObjectConstants>> ObjectCB = nullptr;
 
     // Fence value to mark commands up to this fence point.  This lets us
     // check if these frame resources are still in use by the GPU.

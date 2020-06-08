@@ -10,7 +10,7 @@
 
 #include "../../common/d3dApp.h"
 #include "../../common/MathHelper.h"
-#include "../../common/UploadBuffer.h"
+#include <UDX12/UploadBuffer.h>
 
 #include <UDX12/UDX12.h>
 
@@ -64,7 +64,7 @@ private:
     ComPtr<ID3D12RootSignature> mRootSignature = nullptr;
     ComPtr<ID3D12DescriptorHeap> mCbvHeap = nullptr;
 
-    std::unique_ptr<UploadBuffer<ObjectConstants>> mObjectCB = nullptr;
+    std::unique_ptr<Ubpa::DX12::ArrayUploadBuffer<ObjectConstants>> mObjectCB = nullptr;
 
 	std::unique_ptr<Ubpa::DX12::MeshGeometry> mBoxGeo = nullptr;
 
@@ -190,7 +190,7 @@ void BoxApp::Update(const GameTimer& gt)
 	// Update the constant buffer with the latest worldViewProj matrix.
 	ObjectConstants objConstants;
     XMStoreFloat4x4(&objConstants.WorldViewProj, XMMatrixTranspose(worldViewProj));
-    mObjectCB->CopyData(0, objConstants);
+    mObjectCB->Set(0, objConstants);
 }
 
 void BoxApp::Draw(const GameTimer& gt)
@@ -254,7 +254,7 @@ void BoxApp::Draw(const GameTimer& gt)
         uGCmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
         //uGCmdList->SetGraphicsRootDescriptorTable(0, mCbvHeap->GetGPUDescriptorHandleForHeapStart());
-        uGCmdList->SetGraphicsRootConstantBufferView(0, mObjectCB->Resource()->GetGPUVirtualAddress());
+        uGCmdList->SetGraphicsRootConstantBufferView(0, mObjectCB->GetResource()->GetGPUVirtualAddress());
 
         uGCmdList.DrawIndexed(mBoxGeo->submeshGeometries["box"].IndexCount, 0, 0);
 #pragma endregion
@@ -338,11 +338,11 @@ void BoxApp::BuildConstantBuffers()
     // 1. 创建上传缓冲区
     // 2. 在描述符堆中创建该缓冲区的常量缓冲区视图
 
-	mObjectCB = std::make_unique<UploadBuffer<ObjectConstants>>(uDevice.raw.Get(), 1, true);
+	mObjectCB = std::make_unique<Ubpa::DX12::ArrayUploadBuffer<ObjectConstants>>(uDevice.raw.Get(), 1, true);
 
 	UINT objCBByteSize = Ubpa::DX12::Util::CalcConstantBufferByteSize(sizeof(ObjectConstants));
 
-	D3D12_GPU_VIRTUAL_ADDRESS cbAddress = mObjectCB->Resource()->GetGPUVirtualAddress();
+	D3D12_GPU_VIRTUAL_ADDRESS cbAddress = mObjectCB->GetResource()->GetGPUVirtualAddress();
     // Offset to the ith object constant buffer in the buffer.
     int boxCBufIndex = 0;
 	cbAddress += boxCBufIndex*objCBByteSize;
@@ -488,8 +488,8 @@ void BoxApp::BuildBoxGeometry(DirectX::ResourceUploadBatch& upload)
  //       mBoxGeo->IndexBufferGPU.GetAddressOf());
 
     mBoxGeo->InitBuffer(uDevice.raw.Get(), upload,
-        vertices.data(), (UINT)vertices.size(), sizeof(Vertex), true,
-        indices.data(), (UINT)indices.size(), DXGI_FORMAT_R16_UINT, true
+        vertices.data(), (UINT)vertices.size(), sizeof(Vertex),
+        indices.data(), (UINT)indices.size(), DXGI_FORMAT_R16_UINT
     );
 
 	Ubpa::DX12::SubmeshGeometry submesh;

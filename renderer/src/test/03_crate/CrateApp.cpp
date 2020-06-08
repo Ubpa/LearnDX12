@@ -6,7 +6,7 @@
 
 #include "../../common/d3dApp.h"
 #include "../../common/MathHelper.h"
-#include "../../common/UploadBuffer.h"
+#include <UDX12/UploadBuffer.h>
 #include "../../common/GeometryGenerator.h"
 #include "FrameResource.h"
 
@@ -303,7 +303,7 @@ void CrateApp::Draw(const GameTimer& gt)
 
 			uGCmdList->SetGraphicsRootSignature(mRootSignature.Get());
 
-			auto passCB = mCurrFrameResource->PassCB->Resource();
+			auto passCB = mCurrFrameResource->PassCB->GetResource();
 			uGCmdList->SetGraphicsRootConstantBufferView(2, passCB->GetGPUVirtualAddress());
 
 			DrawRenderItems(uGCmdList.raw.Get(), mOpaqueRitems);
@@ -328,7 +328,7 @@ void CrateApp::Draw(const GameTimer& gt)
 
 	//uGCmdList->SetGraphicsRootSignature(mRootSignature.Get());
 
-	//auto passCB = mCurrFrameResource->PassCB->Resource();
+	//auto passCB = mCurrFrameResource->PassCB->GetResource();
 	//uGCmdList->SetGraphicsRootConstantBufferView(2, passCB->GetGPUVirtualAddress());
 
  //   DrawRenderItems(uGCmdList.raw.Get(), mOpaqueRitems);
@@ -445,7 +445,7 @@ void CrateApp::UpdateObjectCBs(const GameTimer& gt)
 			XMStoreFloat4x4(&objConstants.World, XMMatrixTranspose(world));
 			XMStoreFloat4x4(&objConstants.TexTransform, XMMatrixTranspose(texTransform));
 
-			currObjectCB->CopyData(e->ObjCBIndex, objConstants);
+			currObjectCB->Set(e->ObjCBIndex, objConstants);
 
 			// Next FrameResource need to be updated too.
 			e->NumFramesDirty--;
@@ -471,7 +471,7 @@ void CrateApp::UpdateMaterialCBs(const GameTimer& gt)
 			matConstants.Roughness = mat->Roughness;
 			XMStoreFloat4x4(&matConstants.MatTransform, XMMatrixTranspose(matTransform));
 
-			currMaterialCB->CopyData(mat->MatCBIndex, matConstants);
+			currMaterialCB->Set(mat->MatCBIndex, matConstants);
 
 			// Next FrameResource need to be updated too.
 			mat->NumFramesDirty--;
@@ -511,7 +511,7 @@ void CrateApp::UpdateMainPassCB(const GameTimer& gt)
 	mMainPassCB.Lights[2].Strength = { 0.15f, 0.15f, 0.15f };
 
 	auto currPassCB = mCurrFrameResource->PassCB.get();
-	currPassCB->CopyData(0, mMainPassCB);
+	currPassCB->Set(0, mMainPassCB);
 }
 
 void CrateApp::LoadTextures()
@@ -650,8 +650,8 @@ void CrateApp::BuildShapeGeometry(DirectX::ResourceUploadBatch& upload)
 	geo->IndexBufferByteSize = ibByteSize;*/
 
 	geo->InitBuffer(uDevice.raw.Get(), upload,
-		vertices.data(), (UINT)vertices.size(), sizeof(Vertex), true,
-		indices.data(), (UINT)indices.size(), DXGI_FORMAT_R16_UINT, true);
+		vertices.data(), (UINT)vertices.size(), sizeof(Vertex),
+		indices.data(), (UINT)indices.size(), DXGI_FORMAT_R16_UINT);
 
 	geo->submeshGeometries["box"] = boxSubmesh;
 
@@ -735,8 +735,8 @@ void CrateApp::DrawRenderItems(ID3D12GraphicsCommandList* cmdList, const std::ve
     UINT objCBByteSize = Ubpa::DX12::Util::CalcConstantBufferByteSize(sizeof(ObjectConstants));
     UINT matCBByteSize = Ubpa::DX12::Util::CalcConstantBufferByteSize(sizeof(MaterialConstants));
  
-	auto objectCB = mCurrFrameResource->ObjectCB->Resource();
-	auto matCB = mCurrFrameResource->MaterialCB->Resource();
+	auto objectCB = mCurrFrameResource->ObjectCB->GetResource();
+	auto matCB = mCurrFrameResource->MaterialCB->GetResource();
 
     // For each render item...
     for(size_t i = 0; i < ritems.size(); ++i)
